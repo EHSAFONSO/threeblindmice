@@ -21,7 +21,13 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: ruff check src tests
-      - run: mypy src
+      # Checa os tipos como se estivesse em cada SO: código específico de
+      # plataforma (ex.: asyncio.ProactorEventLoop, só no Windows) passava
+      # localmente e quebrava aqui.
+      - run: |
+          mypy --platform linux src
+          mypy --platform win32 src
+          mypy --platform darwin src
 
   test:
     name: test (${{ matrix.os }}, py${{ matrix.python }})

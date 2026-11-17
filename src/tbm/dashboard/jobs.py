@@ -151,7 +151,13 @@ class JobRunner:
         return job
 
     def _run(self, job: Job, spec: ScanJob) -> None:
-        loop = asyncio.ProactorEventLoop() if sys.platform == "win32" else asyncio.new_event_loop()
+        # `if` em vez de ternário: o mypy só entende checagem de plataforma em
+        # instrução `if`. No Linux, asyncio.ProactorEventLoop nem existe.
+        loop: asyncio.AbstractEventLoop
+        if sys.platform == "win32":
+            loop = asyncio.ProactorEventLoop()
+        else:
+            loop = asyncio.new_event_loop()
         job.status = "running"
         try:
             result, diff = loop.run_until_complete(self.executor(spec, self.store, JobProgress(job)))
