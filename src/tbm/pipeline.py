@@ -52,7 +52,9 @@ async def run_full_scan(
         udp_ports_scanned=scout_options.udp_ports if scout_options.udp else [],
     )
     if targets:
-        result.hosts = await Scout(scout_options, progress).run(targets)
+        scout = Scout(scout_options, progress)
+        result.hosts = await scout.run(targets)
+        result.gateway = scout.report.gateway
     return await run_sniffer(result, sniffer_options, progress)
 
 

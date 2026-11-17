@@ -7,6 +7,7 @@ import re
 import secrets
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from datetime import date
 from typing import Literal
@@ -23,9 +24,10 @@ from tbm.dashboard.jobs import BusyError, JobRunner, ScanParams
 from tbm.dashboard.security import GuiSettings, check_request
 from tbm.models import Severity
 from tbm.scope import Scope, ScopeError
-from tbm.scout.discovery import suggested_target
+from tbm.scout.discovery import local_ipv4, suggested_target
 from tbm.squeak import HistoryStore
 from tbm.squeak.acceptance import is_active
+from tbm.squeak.actions import build_actions, progress
 from tbm.squeak.letter import build_letter
 from tbm.squeak.notify import send_test
 from tbm.squeak.telegram import TelegramError, bot_username, find_chats, looks_like_token
@@ -137,6 +139,25 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
         labels = store.labels()
         return max(labels, key=lambda r: r["started_at"])["label"] if labels else None
 
+    # ───────────────────────── boas-vindas e situação ─────────────────────────
+
+    @app.get("/welcome", response_class=HTMLResponse)
+    def welcome() -> HTMLResponse:
+        return render("welcome.html.j2", suggested=suggested_target(), local_ip=local_ipv4())
+
+    status_cache: dict[str, tuple[float, dict]] = {}
+
+    @app.get("/partials/status", response_class=HTMLResponse)
+    async def status_partial() -> HTMLResponse:
+        label = latest_label() or "casa"
+        cached = status_cache.get(label)
+        if cached is None or time.monotonic() - cached[0] > 60:
+            # consultar o Agendador do Windows leva ~1s: cache curto, fora da thread do servidor
+            st = await asyncio.to_thread(schedule.status, sys.platform, label)
+            status_cache[label] = (time.monotonic(), st)
+        st = status_cache[label][1]
+        return render("status.html.j2", st=st, notify=describe(notify_target()[0]))
+
     # ───────────────────────── novo scan ─────────────────────────
 
     @app.get("/scan", response_class=HTMLResponse)
@@ -184,17 +205,14 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
         if scan is None:
             raise HTTPException(404, "rótulo sem scans")
         acceptances = store.acceptances()
-        devices = {h.address: h for h in scan.hosts}
-        rows = []
-        for f in scan.findings:
-            row = acceptances.get(f.fingerprint)
-            pending = row is not None and is_active(row) and not f.accepted  # vale no próximo scan
-            h = devices.get(f.host)
-            rows.append({"f": f, "pending": pending, "accepted_now": f.accepted or pending,
-                         "device": (h.device_name or h.device_type or h.address) if h else f.host})
-        return render("findings.html.j2", label=label, scan=scan, rows=rows,
-                      severities=sorted(Severity, key=lambda s: -s.rank),
-                      device_names=sorted({r["device"] for r in rows}))
+        # aceito agora pela interface, mas o scan ainda não foi refeito: já mostramos como aceito
+        pending = {fp for fp, row in acceptances.items() if is_active(row)}
+        history = [s for r in store.list(label, 30)[1:] if (s := store.get(r["scan_id"])) is not None]
+        actions = build_actions(scan)
+        info = [f for f in scan.findings if f.severity is Severity.INFO]
+        accepted = [f for f in scan.findings if f.accepted]
+        return render("findings.html.j2", label=label, scan=scan, actions=actions, info=info, accepted=accepted,
+                      pending=pending, progress=progress(history, scan), labels=[r["label"] for r in store.labels()])
 
     @app.post("/api/accept")
     async def accept(request: Request) -> JSONResponse:

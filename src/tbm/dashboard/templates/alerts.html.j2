@@ -16,7 +16,7 @@
   .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 </style>
 
-<section style="margin-top:18px">
+<section class="card" style="margin-top:18px">
   <h2>Alertas</h2>
   <p class="hint">O tbm avisa você quando um scan encontra algo <b>inédito</b>: um achado novo de severidade média ou
     maior, um aparelho que nunca esteve na rede, uma porta nova ou um MAC trocado. Scans sem novidade não mandam nada.</p>
@@ -32,7 +32,7 @@
   </div>
 </section>
 
-<section>
+<section class="card">
   <h2>{{ "Trocar o destino" if current.kind != "none" else "Configurar" }}</h2>
   <div class="tabs">
     <button class="on" data-tab="telegram">Telegram</button>
@@ -81,7 +81,7 @@
   </div>
 </section>
 
-<section>
+<section class="card">
   <h2>Pela linha de comando</h2>
   <p class="hint">A mesma configuração vale para <code>tbm scan</code>, <code>tbm watch</code> e o vigia automático.
     Equivalentes: <code>tbm telegram-setup</code> e <code>tbm notify-test</code>.</p>
@@ -147,7 +147,7 @@ $("test-current")?.addEventListener("click", async () => {
   catch (e) { say($("current-msg"), e.message, false); }
 });
 $("remove-current")?.addEventListener("click", async () => {
-  if (!confirm("Os scans deixam de mandar alertas. Desativar?")) return;
+  if (!await tbmConfirm("Desativar os alertas?", "Os scans deixam de mandar avisos até você configurar de novo.", "Desativar", true)) return;
   try { const r = await tbmPost("/api/alerts/remove", {}); say($("current-msg"), "Alertas desativados. " + r.notes.join(" "), true);
         setTimeout(() => location.reload(), 2000); }
   catch (e) { say($("current-msg"), e.message, false); }

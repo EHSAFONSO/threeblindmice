@@ -1,7 +1,8 @@
-"""Dashboard local (FastAPI + HTMX) sobre o histórico do Squeak.
+"""Dashboard local (FastAPI) sobre o histórico do Squeak.
 
-Só leitura: nenhum endpoint dispara scans. Assim, mesmo exposto por engano,
-o dashboard não vira um scanner controlável pela rede.
+Sem `gui`: somente leitura. Nenhum endpoint dispara scans, então, mesmo
+exposto por engano, ele não vira um scanner controlável pela rede.
+Com `gui`: interface completa (ver gui.py e security.py).
 """
 
 from __future__ import annotations
@@ -14,22 +15,27 @@ if TYPE_CHECKING:
     from tbm.dashboard.security import GuiSettings
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from tbm import __version__
-from tbm.dashboard.charts import score_chart, sparkline
+from tbm.dashboard.charts import sparkline
+from tbm.dashboard.icons import device_icon
+from tbm.dashboard.views import device_detail, health, network_map, timeline, worst
 from tbm.models import ScanResult
 from tbm.squeak import HistoryStore, diff_scans, render_html
 from tbm.squeak.notify import port_label
 
+HERE = Path(__file__).parent
 _env = Environment(
-    loader=FileSystemLoader(Path(__file__).parent / "templates"),
+    loader=FileSystemLoader(HERE / "templates"),
     autoescape=select_autoescape(["html", "j2"]),
     trim_blocks=True,
     lstrip_blocks=True,
 )
 _env.filters["port"] = port_label
+_env.globals["device_icon"] = device_icon
 
 
 def _when(iso: str) -> str:
@@ -68,16 +74,20 @@ def build_inventory(history: list[ScanResult]) -> list[dict]:
             "first_seen": info["first"].strftime("%d/%m/%Y"),
             "times_seen": info["times"],
             "ips": info["ips"],
+            "icon": device_icon(h.device_type),
+            "sev": worst(latest, h.address),
         })
-    return sorted(devices, key=lambda d: (-d["total"], d["host"].address))
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "ok": 4}
+    return sorted(devices, key=lambda d: (order[d["sev"]], -d["total"], d["host"].address))
 
 
 def create_app(store: HistoryStore, gui: GuiSettings | None = None,
                runner: JobRunner | None = None) -> FastAPI:
     """Sem `gui`: dashboard somente leitura (`tbm dashboard`). Com `gui`: interface completa
-    (`tbm gui`), que dispara scans e por isso exige token de sessão (ver security.py)."""
+    (`tbm gui`/`tbm app`), que dispara scans e por isso exige token de sessão (ver security.py)."""
     app = FastAPI(title="threeblindmice", version=__version__, docs_url=None, redoc_url=None,
                   openapi_url=None)
+    app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 
     def render(name: str, **ctx) -> HTMLResponse:
         nav = [r["label"] for r in store.labels()]
@@ -85,22 +95,29 @@ def create_app(store: HistoryStore, gui: GuiSettings | None = None,
             version=__version__, nav_labels=nav, gui=gui is not None,
             csrf_token=gui.token if gui else "", **ctx))
 
-    def series(label: str, limit: int = 30) -> list:
-        return list(reversed(store.list(label, limit)))
+    def latest_label() -> str | None:
+        labels = store.labels()
+        return max(labels, key=lambda r: r["started_at"])["label"] if labels else None
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request) -> HTMLResponse:
-        labels = store.labels()
-        sparks = {r["label"]: sparkline([s["score"] or 0 for s in series(r["label"], 20)]) for r in labels}
-        return render("index.html.j2", labels=labels, sparks=sparks)
+    def index(request: Request, label: str | None = None):
+        chosen = label or latest_label()
+        if chosen is None:
+            if gui is not None:
+                return RedirectResponse("/welcome", status_code=303)
+            return render("index.html.j2", h=None, sparks={})
+        data = health(store, chosen)
+        if data is None:
+            raise HTTPException(404, "rótulo sem scans")
+        sparks = {lb: sparkline([r["score"] or 0 for r in reversed(store.list(lb, 20))]) for lb in data.labels}
+        return render("index.html.j2", h=data, sparks=sparks)
 
     @app.get("/partials/label/{label}", response_class=HTMLResponse)
     def label_panel(label: str) -> HTMLResponse:
-        rows = series(label)
+        rows = store.list(label, 30)
         if not rows:
             raise HTTPException(404, "rótulo sem scans")
-        chart = score_chart([(_when(r["started_at"])[5:], r["score"] or 0) for r in rows])
-        return render("label.html.j2", label=label, rows=list(reversed(rows)), chart=chart)
+        return render("label.html.j2", label=label, rows=rows, t=timeline(store, label))
 
     @app.get("/partials/diff/{new_id}", response_class=HTMLResponse)
     def diff_panel(new_id: str) -> HTMLResponse:
@@ -109,6 +126,13 @@ def create_app(store: HistoryStore, gui: GuiSettings | None = None,
             raise HTTPException(404, "scan não encontrado")
         old = store.latest(new.label, exclude=new.scan_id, before=new.started_at.isoformat())
         return render("diff.html.j2", d=diff_scans(old, new), new=new)
+
+    @app.get("/partials/device/{label}/{address}", response_class=HTMLResponse)
+    def device_panel(label: str, address: str) -> HTMLResponse:
+        data = device_detail(store, label, address)
+        if data is None:
+            raise HTTPException(404, "dispositivo não encontrado")
+        return render("device.html.j2", **data)
 
     @app.get("/scan/{scan_id}", response_class=HTMLResponse)
     def scan_report(scan_id: str) -> HTMLResponse:
@@ -130,6 +154,18 @@ def create_app(store: HistoryStore, gui: GuiSettings | None = None,
         latest = history[-1]
         return render("inventory.html.j2", label=label, scan=latest,
                       devices=build_inventory(history), scans_seen=len(history))
+
+    @app.get("/map")
+    def map_default():
+        label = latest_label()
+        return RedirectResponse(f"/map/{label}" if label else "/", status_code=303)
+
+    @app.get("/map/{label}", response_class=HTMLResponse)
+    def network(label: str) -> HTMLResponse:
+        scan = store.latest(label)
+        if scan is None:
+            raise HTTPException(404, "rótulo sem scans")
+        return render("map.html.j2", label=label, scan=scan, m=network_map(scan))
 
     @app.get("/api/scans")
     def api_scans(label: str | None = None, limit: int = 50) -> JSONResponse:

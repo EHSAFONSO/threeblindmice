@@ -1,0 +1,11 @@
+<div class="stack" style="width:100%">
+  <div class="row"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg>
+    {% if st.installed %}Vigia ativo{% if st.next %} · próximo às {{ st.next.strftime("%H:%M") }}{% endif %}
+    <span class="spacer"></span><span class="dot ok" aria-hidden="true"></span>
+    {% else %}Vigia desligado<span class="spacer"></span><a class="hint" href="/watch">ligar →</a>{% endif %}
+  </div>
+  <div class="row"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg>
+    {% if notify.kind != "none" %}Alertas: {{ notify.label }}<span class="spacer"></span><span class="dot ok" aria-hidden="true"></span>
+    {% else %}Alertas desligados<span class="spacer"></span><a class="hint" href="/alerts">configurar →</a>{% endif %}
+  </div>
+</div>

@@ -6,7 +6,7 @@
   textarea { width: 100%; min-height: 420px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
 </style>
 
-<section style="margin-top:18px">
+<section class="card" style="margin-top:18px">
   <h2>Carta para o provedor</h2>
   <p class="hint">Muitos problemas de uma rede doméstica estão em aparelhos que você não controla, como o modem ou
     ONT da operadora. A saída é abrir um chamado. Esta página escreve o texto com os achados, as evidências e pedidos
@@ -33,7 +33,7 @@
   {% endif %}
 </section>
 
-<section id="out" hidden>
+<section class="card" id="out" hidden>
   <textarea id="text" spellcheck="true"></textarea>
   <p class="hint">Revise e ajuste antes de enviar. O texto não é salvo em lugar nenhum.</p>
   <p><button class="btn" id="copy">Copiar</button> <button class="btn ghost" id="download">Baixar .txt</button>

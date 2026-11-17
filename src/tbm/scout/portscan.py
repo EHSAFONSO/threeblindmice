@@ -95,4 +95,16 @@ async def reverse_dns(ip: str, timeout: float = 1.5) -> str | None:
         name, _ = await asyncio.wait_for(loop.getnameinfo((ip, 0), socket.NI_NAMEREQD), timeout)
     except (TimeoutError, OSError):
         return None
-    return name if name != ip else None
+    return None if name == ip or is_alias_name(name) else name
+
+
+# Nomes que vêm do arquivo hosts local, não do aparelho: o Docker Desktop põe
+# "host.docker.internal" apontando para o IP do próprio PC, e o DNS reverso
+# devolve isso no lugar do nome real.
+_ALIAS_SUFFIXES = (".docker.internal", ".docker.localhost")
+_ALIAS_NAMES = {"localhost", "kubernetes.docker.internal"}
+
+
+def is_alias_name(name: str) -> bool:
+    lower = name.lower().rstrip(".")
+    return lower in _ALIAS_NAMES or lower.endswith(_ALIAS_SUFFIXES)

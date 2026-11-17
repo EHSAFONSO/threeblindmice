@@ -25,6 +25,7 @@ from typing import Any
 from pydantic import BaseModel, field_validator
 
 from tbm.config import notify_target
+from tbm.dashboard.icons import device_icon
 from tbm.models import ScanResult, Severity, utcnow
 from tbm.paths import cache_dir, tbm_home
 from tbm.pipeline import ScanJob, execute
@@ -74,6 +75,7 @@ class Job:
     status: str = "queued"  # queued | running | done | error
     phases: dict[str, list[int]] = field(default_factory=dict)  # fase → [feito, total]
     log: list[str] = field(default_factory=list)
+    devices: dict[str, dict[str, Any]] = field(default_factory=dict)  # aparecem ao vivo na tela
     started: datetime = field(default_factory=utcnow)
     finished: datetime | None = None
     summary: dict[str, Any] | None = None
@@ -84,6 +86,7 @@ class Job:
             "id": self.id, "status": self.status, "label": self.params.label,
             "phases": [{"name": k, "done": d, "total": t} for k, (d, t) in self.phases.items()],
             "log": self.log[-20:], "summary": self.summary, "error": self.error,
+            "devices": [{**d, "icon": device_icon(d.get("type"))} for d in self.devices.values()],
             "elapsed": round(((self.finished or utcnow()) - self.started).total_seconds(), 1),
         }
 
@@ -105,6 +108,10 @@ class JobProgress:
     def log(self, message: str) -> None:
         if "\n" not in message:  # tracebacks ficam fora da interface
             self.job.log.append(message)
+
+    def found(self, address: str, **info: Any) -> None:
+        current = self.job.devices.setdefault(address, {"address": address})
+        current.update({k: v for k, v in info.items() if v is not None})
 
 
 Executor = Callable[[ScanJob, HistoryStore, Any], Awaitable[tuple[ScanResult, ScanDiff]]]

@@ -1,6 +1,7 @@
 """EPSS, backport, CVE end-to-end (com HTTP falso), segredos, SARIF, redação, escopo, dashboard."""
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -282,7 +283,8 @@ def test_dashboard_routes(tmp_path):
     client = TestClient(create_app(store))
     home = client.get("/")
     assert home.status_code == 200 and "casa" in home.text and "data-get" in home.text
-    assert "<script src=" not in home.text  # nada externo: funciona offline
+    assert not re.search(r'<(script|link)[^>]+(src|href)="https?://', home.text)  # nada externo: funciona offline
+    assert client.get("/static/tbm.css").status_code == 200 and client.get("/static/tbm.js").status_code == 200
     inv = client.get("/inventory/casa")
     assert inv.status_code == 200 and "10.0.0.3" in inv.text and "Dispositivos" in inv.text
     assert client.get("/inventory/naoexiste").status_code == 404

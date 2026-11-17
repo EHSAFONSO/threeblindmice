@@ -23,10 +23,13 @@ _env.filters["port"] = port_label
 
 
 def render_html(result: ScanResult, diff: ScanDiff | None = None) -> str:
+    from tbm.squeak.actions import build_actions  # import local: evita ciclo squeak ↔ actions
+
     template = _env.get_template("report.html.j2")
     return template.render(
         r=result,
         diff=diff,
+        actions=build_actions(result)[:10],
         counts=result.severity_counts(),
         severities=sorted(Severity, key=lambda s: -s.rank),
         version=__version__,

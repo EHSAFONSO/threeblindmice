@@ -182,6 +182,7 @@ class ScanResult(BaseModel):
     scope: str = ""
     ports_scanned: list[int] = Field(default_factory=list)
     udp_ports_scanned: list[int] = Field(default_factory=list)
+    gateway: str | None = None  # roteador padrão da máquina que escaneou (base do mapa da rede)
     hosts: list[Host] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)

@@ -9,7 +9,7 @@ from functools import partial
 
 from tbm.asyncutil import RateLimiter, gather_limited
 from tbm.models import Host, Service
-from tbm.progress import NullProgress, ProgressHook
+from tbm.progress import NullProgress, ProgressHook, report_found
 from tbm.scope import Target
 from tbm.scout.arp import OUIDatabase, read_arp_table
 from tbm.scout.banner import grab_service
@@ -77,6 +77,9 @@ class Scout:
         if self.o.mac_lookup and found:
             await self._attach_macs(found)
         self._identify(found)
+        for h in found:  # segunda passada: agora com tipo e portas
+            report_found(self.p, h.address, name=h.device_name or h.hostname, type=h.device_type,
+                         ports=len(h.services), gateway=h.address == self.report.gateway)
         return sorted(found, key=lambda h: ipaddress.ip_address(h.address))
 
     # ───────────────────────── descoberta ─────────────────────────
@@ -127,6 +130,10 @@ class Scout:
             gateway=gateway if gateway in by_ip else None,
         )
         alive = [by_ip[ip] for ip in sorted(methods, key=ipaddress.ip_address)]
+        for target in alive:
+            announced_by = self.report.announcements.get(target.address)
+            report_found(self.p, target.address, name=announced_by.best_name if announced_by else None,
+                         gateway=target.address == self.report.gateway)
         self.p.log(f"{len(alive)}/{len(targets)} hosts encontrados "
                    f"(tcp {sum('tcp' in m for m in methods.values())}, "
                    f"ping {sum('ping' in m for m in methods.values())}, "

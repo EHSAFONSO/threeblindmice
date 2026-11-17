@@ -10,7 +10,7 @@
   label.field { display: block; font-weight: 600; margin: 12px 0 4px; }
 </style>
 
-<section style="margin-top:18px">
+<section class="card" style="margin-top:18px">
   <h2>Vigia automático · {{ label }}</h2>
   <p class="hint">O vigia roda um scan sozinho de tempos em tempos, pelo agendador do sistema
     ({{ "Agendador de Tarefas do Windows, sem abrir janela" if platform == "win32" else "systemd ou cron" }}),
@@ -40,7 +40,7 @@
   {% endif %}
 </section>
 
-<section>
+<section class="card">
   <h2>{{ "Alterar o vigia" if st.installed else "Ligar o vigia" }}</h2>
   {% if notify.kind == "none" %}<p class="error" style="font-weight:400">Os alertas estão desligados: o vigia vai escanear,
     mas não vai avisar você. <a href="/alerts">Configure os alertas</a> primeiro.</p>{% endif %}
@@ -64,7 +64,7 @@
 </section>
 
 {% if log %}
-<section>
+<section class="card">
   <h2>Saída das últimas execuções</h2>
   <pre class="log">{{ log }}</pre>
 </section>
@@ -87,7 +87,7 @@ $("install").addEventListener("click", async () => {
   $("install").disabled = false;
 });
 $("remove")?.addEventListener("click", async () => {
-  if (!confirm("Desligar o vigia? Os scans automáticos param.")) return;
+  if (!await tbmConfirm("Desligar o vigia?", "Os scans automáticos param até você ligar de novo.", "Desligar", true)) return;
   try { await tbmPost("/api/watch/remove", {label}); location.reload(); }
   catch (e) { say($("msg-top"), e.message, false); }
 });

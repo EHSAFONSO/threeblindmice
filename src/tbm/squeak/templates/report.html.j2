@@ -66,16 +66,37 @@
   a { color: var(--accent); }
   footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 32px; }
   @media (max-width: 640px) { .finding-body { padding-left: 0; } summary { flex-wrap: wrap; } }
+  .logo { width: 40px; height: 40px; vertical-align: -10px; margin-right: 6px; }
+  .action { display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px; margin-bottom: 10px; }
+  .action.critical { border-left-color: var(--critical); } .action.high { border-left-color: var(--high); }
+  .action.medium { border-left-color: var(--medium); } .action.low { border-left-color: var(--low); }
+  .action .n { font-weight: 800; color: var(--accent); min-width: 22px; }
+  .action h3 { margin: 0 0 3px; font-size: 15px; }
+  .toolbar { text-align: right; margin-bottom: 8px; }
+  .toolbar button { font: inherit; padding: 7px 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  /* Impressão / salvar como PDF: fundo branco, tudo expandido, sem quebrar cartões ao meio */
+  @media print {
+    :root { --bg: #fff; --panel: #fff; --text: #000; --muted: #444; --line: #ccc; }
+    body { background: #fff; font-size: 11pt; } main { max-width: none; padding: 0; }
+    .toolbar { display: none; } section, .action, details { break-inside: avoid; }
+    details > summary { list-style: none; } details:not([open]) > .finding-body { display: block !important; }
+    a { color: #000; text-decoration: none; } a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 9pt; color: #444; }
+  }
 </style>
 </head>
 <body>
 <main>
+  <div class="toolbar"><button type="button" onclick="document.querySelectorAll('details').forEach(d => d.open = true); window.print()">Imprimir / salvar PDF</button></div>
   <header>
     <div>
-      <h1>🐭🐭🐭 threeblindmice</h1>
+      <h1><svg class="logo" viewBox="0 0 256 256" aria-hidden="true"><circle cx="128" cy="128" r="128" fill="#5b3fd0"/>
+        <g fill="#ffb6c1"><ellipse cx="54" cy="115" rx="10" ry="11"/><ellipse cx="86" cy="115" rx="10" ry="11"/><ellipse cx="112" cy="93" rx="10" ry="11"/>
+        <ellipse cx="144" cy="93" rx="10" ry="11"/><ellipse cx="170" cy="115" rx="10" ry="11"/><ellipse cx="202" cy="115" rx="10" ry="11"/></g>
+        <g fill="#f0f0f5"><circle cx="70" cy="150" r="30"/><circle cx="128" cy="128" r="30"/><circle cx="186" cy="150" r="30"/></g>
+        <g fill="#281e3c"><circle cx="70" cy="148" r="4"/><circle cx="128" cy="126" r="4"/><circle cx="186" cy="148" r="4"/></g></svg>threeblindmice</h1>
       <div class="meta">
         Scan <code>{{ r.scan_id }}</code> · rótulo <b>{{ r.label }}</b> ·
-        {{ r.started_at.strftime("%d/%m/%Y %H:%M") }} UTC
+        {{ r.started_at.astimezone().strftime("%d/%m/%Y %H:%M") }}
         {% if r.finished_at %} · duração {{ ((r.finished_at - r.started_at).total_seconds()) | round(1) }}s{% endif %}
       </div>
       <div class="meta">Alvos: {{ r.targets | join(", ") }}</div>
@@ -100,6 +121,21 @@
       {% endfor %}
     </div>
   </section>
+
+  {% if actions %}
+  <section>
+    <h2>O que fazer, por prioridade</h2>
+    <p class="muted" style="margin-top:0">Os achados estão agrupados pela correção: cada ação resolve vários de uma vez.</p>
+    {% for a in actions %}
+    <div class="action {{ a.severity.value }}">
+      <span class="n">{{ loop.index }}</span>
+      <div><h3>{{ a.title }}</h3><div class="muted">{{ a.why }}</div>
+        <div class="muted" style="margin-top:4px"><span class="sev sev-{{ a.severity.value }}">{{ a.severity.value }}</span>
+          resolve {{ a.findings | length }} achado(s){% if a.kev %} · explorada ativamente (CISA KEV){% endif %}</div></div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
 
   {% if diff and diff.previous_id %}
   <section>

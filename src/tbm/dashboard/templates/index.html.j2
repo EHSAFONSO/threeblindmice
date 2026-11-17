@@ -1,34 +1,103 @@
 {% extends "base.html.j2" %}
+{% block title %}Visão geral · threeblindmice{% endblock %}
 {% block content %}
-  {% if not labels %}
-  <section style="margin-top:22px">
-    {% if gui %}<h2>Bem-vindo!</h2><p>Nenhum scan ainda. Comece descobrindo o que há na sua rede.</p>
-      <p><a class="btn" href="/scan">Fazer o primeiro scan</a> <a class="btn ghost" href="/features">Ver o que o programa faz</a></p>
-    {% else %}<p>Nenhum scan no histórico ainda. Rode <code>tbm scan 192.168.0.0/24 --label casa</code>.</p>{% endif %}
-  </section>
-  {% else %}
-  <div class="cards">
-    {% for r in labels %}
-    <div class="card" data-get="/partials/label/{{ r.label | urlencode }}" data-target="#panel"
-         onclick="document.querySelectorAll('.card').forEach(c=>c.classList.remove('active'));this.classList.add('active')">
-      <div class="top">
-        <b>{{ r.label }}</b>
-        <span class="grade grade-{{ r.grade }}">{{ r.grade }}</span>
+{% if not h %}
+  <div class="card empty">
+    <svg class="icon xl" aria-hidden="true"><use href="#i-radar"/></svg>
+    <h2 style="margin-top:10px">Nenhum scan no histórico ainda</h2>
+    <p>Rode <code>tbm scan 192.168.0.0/24 --label casa</code> ou abra a interface com <code>tbm gui</code>.</p>
+  </div>
+{% else %}
+{% set s = h.scan %}
+<div class="grid main">
+  <section class="card" aria-labelledby="saude">
+    <div class="row" style="align-items:center;gap:26px">
+      <div class="gauge" role="img" aria-label="Nota {{ s.grade }}, {{ s.score }} de 100">
+        <svg viewBox="0 0 180 180" aria-hidden="true">
+          <circle class="track" cx="90" cy="90" r="{{ h.gauge.r }}" fill="none" stroke-width="14"/>
+          <circle class="value grade-stroke-{{ s.grade }}" cx="90" cy="90" r="{{ h.gauge.r }}" fill="none" stroke-width="14"
+                  stroke-linecap="round" stroke="currentColor" style="stroke-dasharray:{{ h.gauge.c }};stroke-dashoffset:{{ h.gauge.c }}"
+                  data-offset="{{ h.gauge.offset }}"/>
+        </svg>
+        <div class="center"><span class="grade grade-{{ s.grade }}">{{ s.grade }}</span><span class="score">{{ s.score }}/100</span></div>
       </div>
-      <div class="muted">{{ r.score }}/100 · {{ r.hosts }} hosts · {{ r.total }} scans</div>
-      <div class="pills">
-        {% if r.critical %}<span class="c">{{ r.critical }} critical</span>{% endif %}
-        {% if r.high %}<span class="h">{{ r.high }} high</span>{% endif %}
-        {% if r.medium %}<span class="m">{{ r.medium }} medium</span>{% endif %}
-        {% if r.low %}<span class="l">{{ r.low }} low</span>{% endif %}
+      <div style="flex:1;min-width:220px">
+        <h1 id="saude" style="font-size:22px">Saúde da rede · {{ h.label }}</h1>
+        <p class="muted" style="margin:6px 0 12px">
+          {% if s.grade in ("A", "B") %}Sua rede está em boa forma.{% elif s.grade == "C" %}Há pontos de atenção, mas nada grave.
+          {% else %}Há problemas que merecem atenção. Comece pelas ações abaixo.{% endif %}
+        </p>
+        <div class="row">
+          {% if h.delta %}<span class="pill trend {{ 'up' if h.delta > 0 else 'down' }}">
+            <svg class="icon" aria-hidden="true"><use href="#i-{{ 'up' if h.delta > 0 else 'down' }}"/></svg>
+            {{ "%+d" | format(h.delta) }} desde o scan anterior</span>{% endif %}
+          {{ sparks.get(h.label, "") | safe }}
+        </div>
+        <div class="row" style="margin-top:12px">
+          {% for sev in ["critical", "high", "medium", "low"] %}{% if h.open_counts[sev] %}
+          <a class="badge sev-{{ sev }}" href="/findings/{{ h.label | urlencode }}?min={{ sev }}">{{ h.open_counts[sev] }} {{ sev }}</a>
+          {% endif %}{% endfor %}
+          {% if not h.open_counts.values() | select | list %}<span class="badge sev-ok">nenhum achado aberto</span>{% endif %}
+        </div>
       </div>
-      {{ sparks[r.label] | safe }}
-      <div class="muted" style="font-size:12px">último: {{ r.started_at | when }}</div>
     </div>
-    {% endfor %}
-  </div>
-  <div id="panel" data-get="/partials/label/{{ labels[0].label | urlencode }}" data-trigger="load">
-    <section class="muted">Carregando…</section>
-  </div>
-  {% endif %}
+  </section>
+
+  <section class="card" aria-labelledby="status">
+    <h2 id="status">Situação</h2>
+    <div class="stack">
+      <div class="row"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>Último scan {{ h.age }}
+        <span class="spacer"></span><a href="/scan/{{ s.scan_id }}" class="hint">relatório</a></div>
+      <div class="row"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg>{{ h.devices }} dispositivo(s)
+        <span class="spacer"></span><a href="/map/{{ h.label | urlencode }}" class="hint">ver no mapa</a></div>
+      {% if gui %}
+      <div class="row" data-get="/partials/status" data-trigger="load"><span class="muted">Carregando vigia e alertas…</span></div>
+      {% endif %}
+      <div>
+        <div class="row hint" style="margin-bottom:6px"><span>Progresso das correções</span><span class="spacer"></span>
+          <b>{{ h.progress.resolved }} de {{ h.progress.total }}</b>&nbsp;resolvidos</div>
+        <div class="progress" role="progressbar" aria-valuenow="{{ h.progress.percent }}" aria-valuemin="0" aria-valuemax="100"
+             aria-label="Progresso das correções"><div style="width:{{ h.progress.percent }}%"></div></div>
+        {% if h.progress.accepted %}<p class="hint" style="margin:6px 0 0">{{ h.progress.accepted }} risco(s) aceito(s) fora da conta.</p>{% endif %}
+      </div>
+    </div>
+  </section>
+</div>
+
+<h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-tool"/></svg>O que fazer agora</h2>
+{% if h.actions %}
+  {% for a in h.actions[:3] %}
+  <article class="action sev-bar {{ a.severity.value }}">
+    <span class="num" aria-hidden="true">{{ loop.index }}</span>
+    <div style="flex:1">
+      <h3>{{ a.title }}</h3>
+      <div class="hint">{{ a.why }}</div>
+      <div class="row" style="margin-top:8px">
+        <span class="badge sev-{{ a.severity.value }}">{{ a.severity.value }}</span>
+        <span class="hint">resolve {{ a.findings | length }} achado(s)</span>
+        {% if a.kev %}<span class="badge sev-critical">explorada ativamente</span>
+        {% elif a.max_epss and a.max_epss >= 0.1 %}<span class="badge sev-high">EPSS {{ "%.0f" | format(a.max_epss * 100) }}%</span>{% endif %}
+        <span class="spacer"></span>
+        {% if gui and a.letter_url(h.label) %}<a class="btn sm ghost" href="{{ a.letter_url(h.label) }}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>Carta para o provedor</a>{% endif %}
+        <a class="btn sm subtle" href="/findings/{{ h.label | urlencode }}#a-{{ a.key }}">Detalhes</a>
+      </div>
+    </div>
+  </article>
+  {% endfor %}
+  {% if h.actions | length > 3 %}<p><a href="/findings/{{ h.label | urlencode }}">Ver todas as {{ h.actions | length }} ações →</a></p>{% endif %}
+{% else %}
+  <div class="card empty"><svg class="icon xl" aria-hidden="true"><use href="#i-shield-check"/></svg>
+    <p>Nada a fazer agora. Os próximos scans avisam se algo mudar.</p></div>
+{% endif %}
+
+<h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-up"/></svg>Evolução</h2>
+{% if h.labels | length > 1 %}
+<div class="row" style="margin-bottom:10px">
+  {% for lb in h.labels %}<a class="pill" href="/?label={{ lb | urlencode }}"{% if lb == h.label %} aria-current="page"{% endif %}>{{ lb }}</a>{% endfor %}
+</div>
+{% endif %}
+<div id="panel" data-get="/partials/label/{{ h.label | urlencode }}" data-trigger="load"><div class="card muted">Carregando…</div></div>
+{% endif %}
+<style>.grade-stroke-A, .grade-stroke-B { color: var(--good); } .grade-stroke-C { color: var(--medium); }
+.grade-stroke-D { color: var(--high); } .grade-stroke-F { color: var(--critical); }</style>
 {% endblock %}

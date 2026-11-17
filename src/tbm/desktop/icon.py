@@ -16,6 +16,28 @@ MOUSE = (240, 240, 245, 255)
 EAR = (255, 182, 193, 255)
 
 
+GRADE_COLORS = {
+    "A": (34, 160, 80, 255), "B": (34, 160, 80, 255), "C": (230, 180, 20, 255),
+    "D": (234, 100, 20, 255), "F": (220, 38, 38, 255),
+}
+
+
+def make_status_icon(grade: str | None, size: int = 64) -> Any:
+    """Ícone da bandeja com um selo na cor da nota: dá para ver a saúde da rede sem abrir o app."""
+    from PIL import ImageDraw
+
+    img = make_icon(size)
+    color = GRADE_COLORS.get(grade or "")
+    if color is None:
+        return img
+    d = ImageDraw.Draw(img)
+    r = size * 0.24
+    cx, cy = size - r - 1, size - r - 1
+    d.ellipse((cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), fill=(255, 255, 255, 255))  # contorno p/ contraste
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color)
+    return img
+
+
 def make_icon(size: int = 256) -> Any:
     from PIL import Image, ImageDraw
 

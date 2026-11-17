@@ -28,13 +28,17 @@ tbm gui
 ```
 
 Abre o navegador numa interface local onde você pode:
-- **fazer um scan** com a sua rede já preenchida, as opções explicadas e o progresso ao vivo;
-- ver os **achados** com filtros, explicação e como corrigir, e **aceitar riscos** com um clique;
-- consultar os **dispositivos** e a evolução da nota;
+- ver a **saúde da rede** de relance: nota no medidor, variação desde o último scan, progresso ("13 de 26 problemas resolvidos") e as **3 ações mais importantes agora**;
+- fazer um scan **ao vivo**, com as etapas e os aparelhos aparecendo conforme são encontrados (a primeira abertura traz um assistente de boas-vindas);
+- ver os **achados agrupados pela correção** ("atualizar o firmware do modem resolve 4 achados"), priorizados por KEV/EPSS, e **aceitar riscos** com um clique;
+- explorar o **mapa da rede** (internet → roteador → aparelhos, colorido pelo pior problema, com aviso de NAT duplo) e os **dispositivos**, cada um com painel de detalhes;
+- acompanhar a **linha do tempo** da nota, com os scans que trouxeram mudanças marcados;
 - configurar **alertas** (assistente do Telegram, ntfy, Discord/Slack), com mensagem de teste antes de salvar;
 - ligar o **vigia automático**, que roda sem abrir janela e mostra a próxima execução e a saída das últimas;
 - gerar a **carta para o provedor** de qualquer equipamento com achados;
 - conhecer **todas as funcionalidades**, com o comando equivalente de cada uma.
+
+Tem tema claro, escuro ou automático, funciona só com teclado e não carrega nada de fora (CSS, JS e ícones são locais). O relatório HTML (o "Relatório completo" da interface, ou o `.html` gerado pelo `tbm run`) traz as ações por prioridade e sai bem impresso ou em PDF.
 
 O destino dos alertas fica em `~/.threeblindmice/config.json`, legível só pelo seu usuário. A ordem de prioridade é `--notify`, depois a variável `TBM_WEBHOOK`, depois o arquivo.
 
@@ -49,7 +53,7 @@ tbm shortcut install          # atalho no menu Iniciar (Windows) ou no lançador
 tbm shortcut install --desktop  # também na Área de Trabalho
 ```
 
-No Windows e no Linux, o app fica com um **ícone na bandeja**. Fechar a janela só a esconde: scans em andamento continuam, e uma notificação avisa quando terminam. Para encerrar, use "Sair" no menu da bandeja (ou `tbm app --no-tray` para fechar junto com a janela). Abrir o app de novo reaproveita a instância que já está rodando.
+No Windows e no Linux, o app fica com um **ícone na bandeja**, com um ponto colorido pela nota do último scan (verde a vermelho). Fechar a janela só a esconde: scans em andamento continuam, e uma notificação avisa quando terminam. Para encerrar, use "Sair" no menu da bandeja (ou `tbm app --no-tray` para fechar junto com a janela). Abrir o app de novo reaproveita a instância que já está rodando.
 
 ## Uso pela linha de comando
 
