@@ -50,7 +50,9 @@ jobs:
         run: docker compose -f integration/compose.yml run --rm --build scanner
       - name: Logs dos serviços (em caso de falha)
         if: failure()
-        run: docker compose -f integration/compose.yml logs --no-color
+        run: |
+          docker compose -f integration/compose.yml ps -a
+          docker compose -f integration/compose.yml logs --no-color
       - if: always()
         run: docker compose -f integration/compose.yml down -v
 
