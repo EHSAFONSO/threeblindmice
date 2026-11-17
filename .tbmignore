@@ -1,0 +1,3 @@
+# Caminhos que o `tbm secrets` ignora (sintaxe estilo .gitignore simplificada).
+# Os testes contêm segredos FALSOS de propósito, para validar o detector.
+tests/

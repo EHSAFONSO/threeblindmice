@@ -3,6 +3,9 @@
 Usamos decaimento exponencial em vez de subtração linear: o primeiro achado
 crítico derruba muito a nota, o décimo LOW quase não mexe. Assim a nota
 nunca fica negativa e continua comparável entre redes de tamanhos diferentes.
+
+O peso de cada achado é ajustado pela probabilidade real de exploração:
+CVE no CISA KEV ou com EPSS alto pesa mais; CVE com EPSS < 1% pesa metade.
 """
 
 from __future__ import annotations
@@ -23,8 +26,26 @@ DECAY = 80.0
 GRADES = ((90, "A"), (75, "B"), (60, "C"), (40, "D"), (0, "F"))
 
 
+def exploitability_multiplier(f: Finding) -> float:
+    if f.kev:
+        return 1.5
+    if f.epss is None:
+        return 1.0
+    if f.epss >= 0.5:
+        return 1.5
+    if f.epss >= 0.1:
+        return 1.2
+    if f.epss < 0.01:
+        return 0.5
+    return 1.0
+
+
+def weight(f: Finding) -> float:
+    return WEIGHTS[f.severity] * exploitability_multiplier(f)
+
+
 def penalty(findings: Iterable[Finding]) -> float:
-    return sum(WEIGHTS[f.severity] for f in findings)
+    return sum(weight(f) for f in findings)
 
 
 def score_findings(findings: Iterable[Finding]) -> int:

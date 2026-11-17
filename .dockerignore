@@ -1,0 +1,8 @@
+.venv
+.git
+.tbm
+reports
+**/__pycache__
+.pytest_cache
+.ruff_cache
+scope.yaml

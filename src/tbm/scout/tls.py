@@ -92,26 +92,46 @@ def tls_info_from_ssl_object(sslobj: ssl.SSLObject) -> TLSInfo:
 LEGACY_VERSIONS = (("TLSv1.0", ssl.TLSVersion.TLSv1), ("TLSv1.1", ssl.TLSVersion.TLSv1_1))
 
 
-async def probe_legacy_protocols(host: str, port: int, timeout: float) -> list[str]:
-    """Tenta handshakes forçando TLS 1.0/1.1.
+# Motivos de erro que indicam limitação do OpenSSL *local*, e não recusa do servidor.
+_LOCAL_LIMITATION_REASONS = {
+    "NO_PROTOCOLS_AVAILABLE",
+    "NO_CIPHERS_AVAILABLE",
+    "NO_SUITABLE_SIGNATURE_ALGORITHM",
+    "UNSUPPORTED_SSL_VERSION",
+}
+_HAS_FLAG = {"TLSv1.0": "HAS_TLSv1", "TLSv1.1": "HAS_TLSv1_1"}
 
-    Atenção: se o OpenSSL local foi compilado sem suporte a essas versões,
-    o resultado é 'não suportado' mesmo que o servidor aceite (falso negativo).
+
+async def probe_legacy_protocols(host: str, port: int, timeout: float) -> tuple[list[str], list[str]]:
+    """Tenta handshakes forçando TLS 1.0 e 1.1.
+
+    Retorna (aceitos, não_testáveis). Se o OpenSSL local foi compilado sem
+    essas versões, não dá para afirmar nada sobre o servidor. Nesse caso o
+    protocolo vai para `não_testáveis`, em vez de virar um falso "não aceita".
     """
     supported: list[str] = []
+    untestable: list[str] = []
     for label, version in LEGACY_VERSIONS:
+        if not getattr(ssl, _HAS_FLAG[label], True):
+            untestable.append(label)
+            continue
         try:
             ctx = insecure_context(version, version)
         except (ValueError, ssl.SSLError):
+            untestable.append(label)
             continue
         try:
             _, writer = await asyncio.wait_for(
                 asyncio.open_connection(host, port, ssl=ctx), max(timeout, 3.0)
             )
-        except (TimeoutError, OSError, ssl.SSLError, ValueError):
+        except ssl.SSLError as exc:
+            if getattr(exc, "reason", None) in _LOCAL_LIMITATION_REASONS:
+                untestable.append(label)
+            continue
+        except (TimeoutError, OSError, ValueError):
             continue
         supported.append(label)
         writer.close()
         with suppress(Exception):
             await writer.wait_closed()
-    return supported
+    return supported, untestable

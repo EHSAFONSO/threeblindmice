@@ -10,7 +10,17 @@ import httpx
 from tbm import USER_AGENT
 from tbm.models import Finding, ScanResult
 from tbm.progress import NullProgress, ProgressHook
-from tbm.sniffer import cve, http_checks, secrets, service_checks, tls_checks  # noqa: F401 (registro)
+from tbm.scope import Scope
+from tbm.sniffer import (  # noqa: F401 (importar registra os checks)
+    cve,
+    http_checks,
+    secrets,
+    service_checks,
+    smb_checks,
+    ssh_checks,
+    tls_checks,
+    udp_checks,
+)
 from tbm.sniffer.base import REGISTRY, Check, CheckContext, SnifferOptions
 from tbm.sniffer.cve import NVDClient
 
@@ -26,6 +36,10 @@ class Sniffer:
         return [c for cls in REGISTRY.values() if (c := cls()).enabled(self.o)]
 
     async def run(self, scan: ScanResult) -> tuple[list[Finding], list[str]]:
+        # Defesa em profundidade: mesmo que o ScanResult venha de um JSON editado
+        # à mão, nenhum check (principalmente os ativos) toca host fora do escopo.
+        (self.o.scope or Scope.default()).enforce(h.address for h in scan.hosts)
+
         checks = self.checks()
         self.p.start(PHASE, len(checks))
         errors: list[str] = []

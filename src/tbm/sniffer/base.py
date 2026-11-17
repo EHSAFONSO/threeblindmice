@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, ClassVar
 import httpx
 
 from tbm.models import Finding, Host, ScanResult, Service
+from tbm.scope import Scope
 
 if TYPE_CHECKING:
     from tbm.sniffer.cve import NVDClient
@@ -30,6 +31,11 @@ class SnifferOptions:
     nvd_api_key: str | None = None
     cache_dir: Path | None = None
     http_timeout: float = 6.0
+    epss: bool = True
+    backport: bool = True  # consulta o tracker da distro para descartar CVEs já corrigidos
+    # Escopo contra o qual os hosts são revalidados antes de qualquer check.
+    # None = Scope.default() (somente redes privadas).
+    scope: Scope | None = None
 
 
 @dataclass
@@ -40,11 +46,11 @@ class CheckContext:
     nvd: NVDClient | None = None
 
     def services(
-        self, predicate: Callable[[Service], bool] = lambda s: True
+        self, predicate: Callable[[Service], bool] = lambda s: True, transport: str = "tcp"
     ) -> Iterator[tuple[Host, Service]]:
         for host in self.scan.hosts:
             for svc in host.services:
-                if predicate(svc):
+                if svc.transport == transport and predicate(svc):
                     yield host, svc
 
 

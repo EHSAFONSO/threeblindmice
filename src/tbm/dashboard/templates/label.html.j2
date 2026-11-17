@@ -1,0 +1,28 @@
+<section>
+  <h2>Evolução da nota · {{ label }}</h2>
+  {{ chart | safe }}
+</section>
+<section>
+  <h2>Scans</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Quando</th><th>Nota</th><th>Hosts</th><th>Crit/High/Med/Low</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.started_at | when }}<br><code class="muted">{{ r.scan_id }}</code></td>
+        <td><b class="grade-{{ r.grade }}">{{ r.grade }}</b> {{ r.score }}</td>
+        <td>{{ r.hosts }}</td>
+        <td><span class="c">{{ r.critical or 0 }}</span> / <span class="h">{{ r.high or 0 }}</span> /
+            <span class="m">{{ r.medium or 0 }}</span> / <span class="l">{{ r.low or 0 }}</span></td>
+        <td>
+          <a href="/scan/{{ r.scan_id }}" target="_blank">relatório</a> ·
+          <button class="link" hx-get="/partials/diff/{{ r.scan_id }}" hx-target="#diff-{{ r.scan_id }}">o que mudou?</button>
+        </td>
+      </tr>
+      <tr><td colspan="5" id="diff-{{ r.scan_id }}" style="border:0;padding:0"></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>

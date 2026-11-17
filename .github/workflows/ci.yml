@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check src tests
+
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  integration:
+    # Sobe serviços vulneráveis de propósito e roda o tbm contra eles, dentro da rede do Compose.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Testes de integração (Docker Compose)
+        run: |
+          docker compose -f integration/compose.yml up --build \
+            --abort-on-container-exit --exit-code-from scanner
+      - if: always()
+        run: docker compose -f integration/compose.yml down -v
+
+  secrets:
+    # O tbm escaneia o próprio repositório; os achados aparecem na aba Security e nos PRs.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      - run: tbm secrets . --output tbm-secrets.sarif --no-fail
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tbm-secrets.sarif
+          category: tbm-secrets

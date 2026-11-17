@@ -11,8 +11,13 @@ from urllib.parse import urlparse
 import httpx
 
 from tbm import USER_AGENT
-from tbm.models import Finding, ScanResult, Severity
+from tbm.models import Finding, PortKey, ScanResult, Severity
 from tbm.squeak.diff import ScanDiff
+
+
+def port_label(port: PortKey) -> str:
+    host, number, transport = port
+    return f"{host}:{number}" + ("/udp" if transport == "udp" else "")
 
 
 def relevant(diff: ScanDiff, min_severity: Severity) -> list[Finding]:
@@ -31,9 +36,11 @@ def build_message(result: ScanResult, diff: ScanDiff, items: list[Finding]) -> s
         if len(items) > 15:
             lines.append(f"… e mais {len(items) - 15}")
     if diff.new_hosts:
-        lines.append("Hosts novos na rede: " + ", ".join(diff.new_hosts[:10]))
+        lines.append("Dispositivos novos na rede: " + ", ".join(h.display for h in diff.new_hosts[:10]))
     if diff.opened_ports:
-        lines.append("Portas novas: " + ", ".join(f"{h}:{p}" for h, p in diff.opened_ports[:10]))
+        lines.append("Portas novas: " + ", ".join(port_label(p) for p in diff.opened_ports[:10]))
+    for ip, old_mac, new_mac in diff.mac_changes[:5]:
+        lines.append(f"⚠ MAC de {ip} mudou: {old_mac} → {new_mac} (troca de aparelho ou ARP spoofing?)")
     if diff.resolved_findings:
         lines.append(f"✅ {len(diff.resolved_findings)} achado(s) resolvido(s)")
     return "\n".join(lines)
@@ -53,7 +60,9 @@ def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Find
         "score": result.score,
         "grade": result.grade,
         "new_findings": [f.model_dump(mode="json") for f in items],
-        "new_hosts": diff.new_hosts,
+        "new_hosts": [h.model_dump(mode="json", exclude={"services"}) for h in diff.new_hosts],
+        "opened_ports": [port_label(p) for p in diff.opened_ports],
+        "mac_changes": [{"ip": ip, "old": o, "new": n} for ip, o, n in diff.mac_changes],
     }
 
 
@@ -62,7 +71,7 @@ async def send_webhook(
 ) -> bool:
     """Retorna True se enviou, False se não havia nada relevante."""
     items = relevant(diff, min_severity)
-    if not items and not diff.new_hosts and not diff.opened_ports:
+    if not items and not diff.new_hosts and not diff.opened_ports and not diff.mac_changes:
         return False
     async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT}) as client:
         resp = await client.post(url, json=build_payload(url, result, diff, items))

@@ -154,3 +154,23 @@ class Scope:
         if not targets:
             raise ScopeError("nenhum alvo restante depois de aplicar as exclusões")
         return list(targets.values())
+
+    def enforce(self, addresses: Iterable[str]) -> None:
+        """Garante que todos os endereços estão no escopo.
+
+        Usado quando os alvos não vieram do `resolve()`. Por exemplo, um
+        scout.json carregado do disco pode ter sido editado à mão.
+        """
+        violations = []
+        for addr in addresses:
+            try:
+                ok = self.contains(addr)
+            except ValueError:
+                ok = False
+            if not ok:
+                violations.append(addr)
+        if violations:
+            shown = ", ".join(violations[:10]) + (" …" if len(violations) > 10 else "")
+            raise ScopeError(
+                f"{len(violations)} host(s) fora do escopo autorizado [{self.source}]: {shown}"
+            )

@@ -1,0 +1,24 @@
+<div style="padding:10px 0 16px">
+{% if not d.previous_id %}
+  <p class="muted">Primeiro scan deste rótulo: nada para comparar.</p>
+{% elif not d.has_changes %}
+  <p class="muted">Nada mudou em relação a <code>{{ d.previous_id }}</code>.</p>
+{% else %}
+  <div class="diff-grid">
+    <div><span class="label">Novos</span><br>
+      {% for f in d.new_findings[:8] %}<span class="{{ f.severity.value[0] }}">●</span> {{ f.title }} <span class="muted">{{ f.location }}</span><br>{% else %}—{% endfor %}
+      {% if d.new_findings | length > 8 %}<span class="muted">+{{ d.new_findings | length - 8 }}</span>{% endif %}</div>
+    <div><span class="label">Resolvidos</span><br>
+      {% for f in d.resolved_findings[:8] %}✓ {{ f.title }}<br>{% else %}—{% endfor %}</div>
+    <div><span class="label">Dispositivos</span><br>
+      {% for h in d.new_hosts %}+ {{ h.display }}<br>{% endfor %}
+      {% for h in d.gone_hosts %}− {{ h.display }}<br>{% endfor %}
+      {% if not d.new_hosts and not d.gone_hosts %}—{% endif %}</div>
+    <div><span class="label">Portas</span><br>
+      {% for p in d.opened_ports %}+ <code>{{ p | port }}</code><br>{% endfor %}
+      {% for p in d.closed_ports %}− <code>{{ p | port }}</code><br>{% endfor %}
+      {% if not d.opened_ports and not d.closed_ports %}—{% endif %}</div>
+  </div>
+  {% for ip, old, new in d.mac_changes %}<p class="c">⚠ MAC de {{ ip }} mudou: {{ old }} → {{ new }}</p>{% endfor %}
+{% endif %}
+</div>

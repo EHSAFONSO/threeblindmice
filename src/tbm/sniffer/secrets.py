@@ -11,7 +11,9 @@ import asyncio
 import math
 import re
 from collections import Counter
+from contextlib import suppress
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 
 from tbm.models import Finding, Severity
@@ -101,10 +103,32 @@ def iter_files(root: Path):
             yield path
 
 
+PRAGMA = "tbm:allow"  # comentário na linha = falso positivo conhecido
+IGNORE_FILE = ".tbmignore"
+
+
+def load_ignore(base: Path) -> list[str]:
+    path = base / IGNORE_FILE
+    if not path.is_file():
+        return []
+    lines = (ln.strip() for ln in path.read_text(encoding="utf-8").splitlines())
+    return [ln.rstrip("/") for ln in lines if ln and not ln.startswith("#")]
+
+
+def is_ignored(rel: str, patterns: list[str]) -> bool:
+    """Sintaxe estilo .gitignore simplificada: 'tests/', 'tests/**', '*.lock', 'docs/x.md'."""
+    name = rel.rsplit("/", 1)[-1]
+    for p in patterns:
+        base = p.removesuffix("/**")
+        if fnmatch(rel, p) or fnmatch(name, p) or rel == base or rel.startswith(base + "/"):
+            return True
+    return False
+
+
 def scan_text(text: str, rel: str) -> list[Finding]:
     findings: list[Finding] = []
     for lineno, line in enumerate(text.splitlines(), 1):
-        if len(line) > 5000:  # provavelmente minificado ou dados
+        if len(line) > 5000 or PRAGMA in line:  # minificado/dados, ou liberado explicitamente
             continue
         matched = False
         for rule in RULES:
@@ -125,6 +149,8 @@ def scan_text(text: str, rel: str) -> list[Finding]:
                     severity=rule.severity,
                     title=f"{rule.title} em {rel}",
                     host="local",
+                    file=rel,
+                    line=lineno,
                     description="Credenciais em código acabam em repositórios, backups e "
                                 "imagens de container.",
                     evidence=f"{rel}:{lineno}  {shown}",
@@ -137,17 +163,41 @@ def scan_text(text: str, rel: str) -> list[Finding]:
     return findings
 
 
+def _relative(path: Path, root: Path, base: Path) -> str:
+    with suppress(ValueError):
+        return path.relative_to(base).as_posix()
+    return path.name if root.is_file() else path.relative_to(root).as_posix()
+
+
+def scan_paths(paths: list[Path], base: Path | None = None) -> list[Finding]:
+    """Varre arquivos e diretórios. Caminhos e o .tbmignore são relativos a `base`.
+
+    Com `base` = raiz do repositório, os caminhos batem com os do git, e é isso
+    que permite ao GitHub (via SARIF) anotar a linha exata no PR.
+    """
+    base = (base or Path.cwd()).resolve()
+    patterns = load_ignore(base)
+    findings: list[Finding] = []
+    seen: set[Path] = set()
+    for root in (p.resolve() for p in paths):
+        for path in iter_files(root):
+            if path in seen:
+                continue
+            seen.add(path)
+            rel = _relative(path, root, base)
+            if is_ignored(rel, patterns):
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            findings += scan_text(text, rel)
+    return findings
+
+
 def scan_path(root: Path) -> list[Finding]:
     root = root.resolve()
-    findings: list[Finding] = []
-    for path in iter_files(root):
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        rel = path.name if root.is_file() else path.relative_to(root).as_posix()
-        findings += scan_text(text, rel)
-    return findings
+    return scan_paths([root], base=root if root.is_dir() else root.parent)
 
 
 @register

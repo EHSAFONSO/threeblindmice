@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -23,12 +26,15 @@ from rich.table import Table
 
 from tbm import __version__
 from tbm.models import Finding, Host, ScanResult, Severity
-from tbm.pipeline import finalize, run_full_scan, run_sniffer
+from tbm.paths import cache_dir
+from tbm.pipeline import ScanJob, execute, finalize, run_sniffer
 from tbm.scope import Scope, ScopeError
 from tbm.scout import Scout, ScoutOptions, parse_ports
+from tbm.scout.arp import OUIDatabase, download_oui
 from tbm.sniffer import REGISTRY, SnifferOptions
-from tbm.sniffer.secrets import scan_path
-from tbm.squeak import HistoryStore, ScanDiff, diff_scans, send_webhook, tbm_home, write_report
+from tbm.sniffer.secrets import scan_paths
+from tbm.squeak import HistoryStore, ScanDiff, diff_scans, send_webhook, write_report
+from tbm.squeak.notify import port_label
 
 app = typer.Typer(
     name="tbm",
@@ -114,19 +120,45 @@ def _run(coro):
         return asyncio.run(coro)
     except KeyboardInterrupt:
         raise _fail("interrompido pelo usuário", 130) from None
+    except ScopeError as exc:
+        raise _fail(str(exc)) from exc
 
 
 def _sniffer_options(active: bool, no_cve: bool, secrets: Path | None, disable: list[str],
-                     max_cves: int) -> SnifferOptions:
+                     max_cves: int, scope: Scope, no_epss: bool = False,
+                     no_backport: bool = False) -> SnifferOptions:
     return SnifferOptions(
         active=active,
         cve=not no_cve,
+        epss=not no_epss,
+        backport=not no_backport,
         secrets_path=secrets,
         disabled=set(disable),
         max_cves_per_service=max_cves,
         nvd_api_key=os.environ.get("NVD_API_KEY"),
-        cache_dir=tbm_home() / "cache" / "nvd",
+        cache_dir=cache_dir("intel"),
+        scope=scope,
     )
+
+
+def _scout_options(ports: str, timeout: float, concurrency: int, no_discovery: bool,
+                   udp: bool = False, no_mac: bool = False) -> ScoutOptions:
+    try:
+        port_list = parse_ports(ports)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    return ScoutOptions(ports=port_list, timeout=timeout, concurrency=concurrency,
+                        discovery=not no_discovery, udp=udp, mac_lookup=not no_mac)
+
+
+def parse_interval(text: str) -> int:
+    m = re.fullmatch(r"(\d+)\s*([smhd])", text.strip().lower())
+    if not m:
+        raise ValueError(f"intervalo inválido: {text!r} (use 30m, 6h, 1d)")
+    seconds = int(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+    if seconds < 60:
+        raise ValueError("intervalo mínimo: 1 minuto")
+    return seconds
 
 
 # ───────────────────────────── renderização ─────────────────────────────
@@ -143,30 +175,35 @@ def print_hosts(hosts: list[Host]) -> None:
     table.add_column("Produto")
     table.add_column("TLS")
     for h in hosts:
+        label = h.display + (f"\n[dim]{h.mac}[/]" if h.mac else "")
         if not h.services:
-            table.add_row(h.display, "-", "[dim]sem portas abertas[/]", "", "")
+            table.add_row(label, "-", "[dim]sem portas abertas[/]", "", "")
         for i, s in enumerate(h.services):
             tls = ""
             if s.tls:
                 tls = s.tls.protocol or "tls"
                 if s.tls.not_after:
                     tls += f" · até {s.tls.not_after:%Y-%m-%d}"
-            table.add_row(h.display if i == 0 else "", str(s.port), s.name or "?",
+            port = f"{s.port}/udp" if s.transport == "udp" else str(s.port)
+            table.add_row(label if i == 0 else "", port, s.name or "?",
                           " ".join(x for x in (s.product, s.version) if x), tls)
         table.add_section()
     console.print(table)
 
 
-def print_findings(findings: list[Finding], limit: int = 50) -> None:
+def print_findings(findings: list[Finding], limit: int = 50, title: str = "Achados") -> None:
     if not findings:
         console.print("[bold green]Nenhum achado.[/]")
         return
-    table = Table(title=f"Achados ({len(findings)})", header_style="bold", expand=True)
+    table = Table(title=f"{title} ({len(findings)})", header_style="bold", expand=True)
     table.add_column("Sev.", no_wrap=True)
     table.add_column("Achado", ratio=3)
     table.add_column("Local", no_wrap=True)
     for f in findings[:limit]:
-        table.add_row(f"[{SEV_STYLE[f.severity]}] {f.severity.value.upper()} [/]", f.title, f.location)
+        badge = f"[{SEV_STYLE[f.severity]}] {f.severity.value.upper()} [/]"
+        if f.kev:
+            badge += " [bold red]KEV[/]"
+        table.add_row(badge, f.title, f.location)
     console.print(table)
     if len(findings) > limit:
         console.print(f"[dim]… mais {len(findings) - limit} achados no relatório.[/]")
@@ -190,8 +227,10 @@ def print_summary(result: ScanResult, diff: ScanDiff | None = None) -> None:
         lines.append(
             f"Desde [cyan]{diff.previous_id}[/]: [red]+{len(diff.new_findings)}[/] novos, "
             f"[green]-{len(diff.resolved_findings)}[/] resolvidos, "
-            f"{len(diff.new_hosts)} hosts novos, {len(diff.opened_ports)} portas novas"
+            f"{len(diff.new_hosts)} dispositivo(s) novo(s), {len(diff.opened_ports)} porta(s) nova(s)"
         )
+        lines += [f"  [yellow]+ {h.display}[/]" for h in diff.new_hosts[:5]]
+        lines += [f"  [bold red]⚠ MAC de {ip} mudou: {o} → {n}[/]" for ip, o, n in diff.mac_changes]
     if result.errors:
         lines.append(f"[yellow]{len(result.errors)} erro(s) em checks; veja o relatório.[/]")
     console.print(Panel("\n".join(lines), title=f"Squeak · {result.label}", expand=False))
@@ -203,29 +242,38 @@ def _exit_code(findings: list[Finding], fail_on: Severity | None) -> int:
     return 0
 
 
+async def _notify(webhook: str | None, result: ScanResult, diff: ScanDiff, min_severity: Severity) -> None:
+    if not webhook:
+        return
+    try:
+        sent = await send_webhook(webhook, result, diff, min_severity)
+        console.print("Alerta enviado." if sent else "[dim]Nada novo para alertar.[/]")
+    except Exception as exc:  # noqa: BLE001
+        err.print(f"[yellow]falha ao enviar webhook: {exc}[/]")
+
+
 # ───────────────────────────── opções comuns ─────────────────────────────
 
 TargetsArg = Annotated[list[str], typer.Argument(help="IPs, CIDRs (10.0.0.0/24), faixas (10.0.0.1-50) ou hostnames.")]
 PortsOpt = Annotated[str, typer.Option("--ports", "-p", help="common | web | all | 22,80 | 1-1024")]
 ScopeOpt = Annotated[Path | None, typer.Option("--scope", "-s", help="scope.yaml com os alvos autorizados.", exists=True, dir_okay=False)]
+LabelOpt = Annotated[str, typer.Option("--label", "-l", help="Nome do ambiente; o diff é feito contra o último scan com o mesmo rótulo.")]
 TimeoutOpt = Annotated[float, typer.Option(help="Timeout por conexão, em segundos.")]
 ConcOpt = Annotated[int, typer.Option(help="Máximo de sockets simultâneos.")]
 NoDiscOpt = Annotated[bool, typer.Option("--no-discovery", "-Pn", help="Não testa se o host está vivo; escaneia todos.")]
-ActiveOpt = Annotated[bool, typer.Option("--active", help="Checks ativos: FTP anônimo, caminhos sensíveis, APIs abertas.")]
+UdpOpt = Annotated[bool, typer.Option("--udp", help="Sondas UDP: DNS, NTP, SNMP, SSDP, mDNS.")]
+NoMacOpt = Annotated[bool, typer.Option("--no-mac", help="Não lê a tabela ARP (MAC e fabricante).")]
+ActiveOpt = Annotated[bool, typer.Option("--active", help="Checks ativos: FTP anônimo, auth SSH, caminhos sensíveis, APIs abertas.")]
 NoCveOpt = Annotated[bool, typer.Option("--no-cve", help="Não consulta o NVD.")]
+NoEpssOpt = Annotated[bool, typer.Option("--no-epss", help="Não consulta o EPSS (FIRST.org).")]
+NoBackportOpt = Annotated[bool, typer.Option("--no-backport", help="Não consulta o tracker da distro.")]
 SecretsOpt = Annotated[Path | None, typer.Option("--secrets", help="Também procura segredos neste diretório.", exists=True)]
 DisableOpt = Annotated[list[str], typer.Option("--disable", "-x", help="Desativa um check ou grupo (ex.: http, cve.nvd).")]
 MaxCvesOpt = Annotated[int, typer.Option(help="Máximo de CVEs por serviço.")]
+NotifyOpt = Annotated[str | None, typer.Option(help="URL de webhook (Discord, Slack ou genérico). Também lê TBM_WEBHOOK.")]
+MinSevOpt = Annotated[Severity, typer.Option(help="Severidade mínima para alertar.")]
+NoEvidenceOpt = Annotated[bool, typer.Option("--no-evidence", help="Não grava banners e trechos de evidência (histórico e relatório).")]
 VerboseOpt = Annotated[bool, typer.Option("--verbose", "-v")]
-
-
-def _scout_options(ports: str, timeout: float, concurrency: int, no_discovery: bool) -> ScoutOptions:
-    try:
-        port_list = parse_ports(ports)
-    except ValueError as exc:
-        raise _fail(str(exc)) from exc
-    return ScoutOptions(ports=port_list, timeout=timeout, concurrency=concurrency,
-                        discovery=not no_discovery)
 
 
 # ───────────────────────────── comandos ─────────────────────────────
@@ -236,45 +284,41 @@ def scan(
     targets: TargetsArg,
     ports: PortsOpt = "common",
     scope: ScopeOpt = None,
-    label: Annotated[str, typer.Option("--label", "-l", help="Nome do ambiente; o diff é feito contra o último scan com o mesmo rótulo.")] = "default",
+    label: LabelOpt = "default",
     timeout: TimeoutOpt = 1.0,
     concurrency: ConcOpt = 400,
     no_discovery: NoDiscOpt = False,
+    udp: UdpOpt = False,
+    no_mac: NoMacOpt = False,
     active: ActiveOpt = False,
     no_cve: NoCveOpt = False,
+    no_epss: NoEpssOpt = False,
+    no_backport: NoBackportOpt = False,
     secrets: SecretsOpt = None,
     disable: DisableOpt = [],  # noqa: B006 (typer exige lista literal)
     max_cves: MaxCvesOpt = 15,
-    report: Annotated[Path | None, typer.Option("--report", "-o", help="Caminho do relatório (.html ou .json).")] = None,
-    notify: Annotated[str | None, typer.Option(help="URL de webhook (Discord, Slack ou genérico). Também lê TBM_WEBHOOK.")] = None,
-    min_severity: Annotated[Severity, typer.Option(help="Severidade mínima para alertar.")] = Severity.MEDIUM,
+    report: Annotated[Path | None, typer.Option("--report", "-o", help="Caminho do relatório (.html, .json ou .sarif).")] = None,
+    notify: NotifyOpt = None,
+    min_severity: MinSevOpt = Severity.MEDIUM,
     fail_on: Annotated[Severity | None, typer.Option(help="Sai com código 1 se houver achado com esta severidade ou maior (bom para CI).")] = None,
     no_save: Annotated[bool, typer.Option("--no-save", help="Não grava no histórico.")] = False,
+    no_evidence: NoEvidenceOpt = False,
     verbose: VerboseOpt = False,
 ) -> None:
     """[bold]Os três juntos:[/] Scout → Sniffer → Squeak (nota, diff, relatório, alerta)."""
     console.print(BANNER.format(v=__version__))
     sc = _scope(scope)
-    try:
-        resolved = sc.resolve(targets)
-    except ScopeError as exc:
-        raise _fail(str(exc)) from exc
-    scout_opts = _scout_options(ports, timeout, concurrency, no_discovery)
-    sniff_opts = _sniffer_options(active, no_cve, secrets, disable, max_cves)
-    console.print(f"[dim]Escopo: {sc.source} · {len(resolved)} alvo(s) · "
-                  f"{len(scout_opts.ports)} porta(s) · checks ativos: {'sim' if active else 'não'}[/]")
-
-    with _progress() as prog:
-        result = _run(run_full_scan(
-            targets=resolved, specs=targets, scope_source=sc.source, label=label,
-            scout_options=scout_opts, sniffer_options=sniff_opts,
-            progress=RichProgress(prog, verbose),
-        ))
+    job = ScanJob(
+        specs=targets, scope=sc, label=label, save=not no_save, no_evidence=no_evidence,
+        scout_options=_scout_options(ports, timeout, concurrency, no_discovery, udp, no_mac),
+        sniffer_options=_sniffer_options(active, no_cve, secrets, disable, max_cves, sc, no_epss, no_backport),
+    )
+    console.print(f"[dim]Escopo: {sc.source} · {len(job.scout_options.ports)} porta(s) TCP"
+                  f"{' + UDP' if udp else ''} · checks ativos: {'sim' if active else 'não'}[/]")
 
     store = HistoryStore()
-    diff = diff_scans(store.latest(label, exclude=result.scan_id), result)
-    if not no_save:
-        store.save(result)
+    with _progress() as prog:
+        result, diff = _run(execute(job, store, RichProgress(prog, verbose)))
 
     print_hosts(result.hosts)
     print_findings(result.findings)
@@ -283,16 +327,65 @@ def scan(
     out = report or Path("reports") / f"tbm-{label}-{result.started_at:%Y%m%d-%H%M%S}.html"
     write_report(result, out, diff)
     console.print(f"Relatório: [link=file://{out.resolve()}]{out}[/]  ·  scan_id [cyan]{result.scan_id}[/]")
-
-    webhook = notify or os.environ.get("TBM_WEBHOOK")
-    if webhook:
-        try:
-            sent = _run(send_webhook(webhook, result, diff, min_severity))
-            console.print("Alerta enviado." if sent else "[dim]Nada novo para alertar.[/]")
-        except Exception as exc:  # noqa: BLE001
-            err.print(f"[yellow]falha ao enviar webhook: {exc}[/]")
-
+    _run(_notify(notify or os.environ.get("TBM_WEBHOOK"), result, diff, min_severity))
     raise typer.Exit(_exit_code(result.findings, fail_on))
+
+
+@app.command()
+def watch(
+    targets: TargetsArg,
+    every: Annotated[str, typer.Option("--every", "-e", help="Intervalo entre scans: 30m, 6h, 1d.")] = "6h",
+    ports: PortsOpt = "common",
+    scope: ScopeOpt = None,
+    label: LabelOpt = "default",
+    udp: UdpOpt = False,
+    active: ActiveOpt = False,
+    no_cve: NoCveOpt = False,
+    notify: NotifyOpt = None,
+    min_severity: MinSevOpt = Severity.MEDIUM,
+    no_evidence: NoEvidenceOpt = False,
+    runs: Annotated[int, typer.Option(help="Para depois de N execuções (0 = infinito).")] = 0,
+) -> None:
+    """Scan periódico: repete o scan e só alerta quando algo [bold]muda[/]."""
+    try:
+        interval = parse_interval(every)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    sc = _scope(scope)
+    sc.resolve(targets)  # falha cedo se o escopo estiver errado
+    webhook = notify or os.environ.get("TBM_WEBHOOK")
+    job = ScanJob(
+        specs=targets, scope=sc, label=label, no_evidence=no_evidence,
+        scout_options=_scout_options(ports, 1.0, 400, False, udp),
+        sniffer_options=_sniffer_options(active, no_cve, None, [], 15, sc),
+    )
+    store = HistoryStore()
+    console.print(BANNER.format(v=__version__))
+    console.print(f"Vigiando [bold]{', '.join(targets)}[/] a cada {every} · rótulo [cyan]{label}[/] · "
+                  f"alertas: {'webhook' if webhook else '[yellow]nenhum (use --notify)[/]'} · Ctrl+C para sair")
+    count = 0
+    try:
+        while True:
+            count += 1
+            stamp = datetime.now().strftime("%d/%m %H:%M")
+            try:
+                result, diff = asyncio.run(execute(job, store))
+            except ScopeError as exc:
+                raise _fail(str(exc)) from exc
+            except Exception as exc:  # noqa: BLE001 (o vigia não pode morrer por um erro transitório)
+                err.print(f"[{stamp}] [red]scan falhou:[/] {exc}")
+            else:
+                changes = (f"[red]+{len(diff.new_findings)}[/] [green]-{len(diff.resolved_findings)}[/] "
+                           f"· {len(diff.new_hosts)} dispositivo(s) novo(s)") if diff.previous_id else "primeiro scan"
+                console.print(f"[{stamp}] nota [{GRADE_STYLE.get(result.grade or 'F')}]{result.grade}[/] "
+                              f"{result.score}/100 · {changes}")
+                write_report(result, Path("reports") / f"tbm-{label}-latest.html", diff)
+                asyncio.run(_notify(webhook, result, diff, min_severity))
+            if runs and count >= runs:
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        console.print("\nVigia encerrado.")
 
 
 @app.command()
@@ -303,6 +396,8 @@ def scout(
     timeout: TimeoutOpt = 1.0,
     concurrency: ConcOpt = 400,
     no_discovery: NoDiscOpt = False,
+    udp: UdpOpt = False,
+    no_mac: NoMacOpt = False,
     output: Annotated[Path, typer.Option("--output", "-o")] = Path("scout.json"),
     verbose: VerboseOpt = False,
 ) -> None:
@@ -312,8 +407,9 @@ def scout(
         resolved = sc.resolve(targets)
     except ScopeError as exc:
         raise _fail(str(exc)) from exc
-    opts = _scout_options(ports, timeout, concurrency, no_discovery)
-    result = ScanResult(targets=targets, scope=sc.source, ports_scanned=opts.ports)
+    opts = _scout_options(ports, timeout, concurrency, no_discovery, udp, no_mac)
+    result = ScanResult(targets=targets, scope=sc.source, ports_scanned=opts.ports,
+                        udp_ports_scanned=opts.udp_ports if udp else [])
     with _progress() as prog:
         result.hosts = _run(Scout(opts, RichProgress(prog, verbose)).run(resolved))
     print_hosts(result.hosts)
@@ -324,6 +420,7 @@ def scout(
 @app.command()
 def sniff(
     input: Annotated[Path, typer.Argument(help="JSON gerado pelo `tbm scout`.", exists=True, dir_okay=False)],
+    scope: ScopeOpt = None,
     active: ActiveOpt = False,
     no_cve: NoCveOpt = False,
     secrets: SecretsOpt = None,
@@ -332,9 +429,14 @@ def sniff(
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Padrão: sobrescreve o arquivo de entrada.")] = None,
     verbose: VerboseOpt = False,
 ) -> None:
-    """[bold]Sniffer:[/] analisa um resultado do Scout e gera achados."""
+    """[bold]Sniffer:[/] analisa um resultado do Scout e gera achados.
+
+    Os hosts do JSON são revalidados contra o escopo: um arquivo editado à mão
+    não consegue apontar os checks para alvos não autorizados.
+    """
     result = ScanResult.model_validate_json(input.read_text(encoding="utf-8"))
-    opts = _sniffer_options(active, no_cve, secrets, disable, max_cves)
+    sc = _scope(scope)
+    opts = _sniffer_options(active, no_cve, secrets, disable, max_cves, sc)
     with _progress() as prog:
         result = _run(run_sniffer(result, opts, RichProgress(prog, verbose)))
     print_findings(result.findings)
@@ -346,13 +448,24 @@ def sniff(
 
 @app.command("secrets")
 def secrets_cmd(
-    path: Annotated[Path, typer.Argument(exists=True, help="Diretório ou arquivo a varrer.")],
+    paths: Annotated[list[Path], typer.Argument(exists=True, help="Diretórios ou arquivos a varrer.")],
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Exporta .sarif (GitHub), .json ou .html.")] = None,
     fail: Annotated[bool, typer.Option("--fail/--no-fail", help="Sai com código 1 se encontrar algo (para pre-commit/CI).")] = True,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Só imprime se encontrar algo.")] = False,
 ) -> None:
-    """Procura credenciais vazadas em código e configs (sem rede)."""
-    findings = sorted(scan_path(path), key=Finding.sort_key)
+    """Procura credenciais vazadas em código e configs (sem rede).
+
+    Falsos positivos: comente [cyan]tbm:allow[/] na linha ou liste caminhos no [cyan].tbmignore[/].
+    """
+    findings = sorted(scan_paths(paths), key=Finding.sort_key)
+    if output:
+        result = finalize(ScanResult(label="secrets", targets=[str(p) for p in paths], findings=findings))
+        write_report(result, output)
+        if not quiet:
+            console.print(f"Exportado para [bold]{output}[/]")
     if not findings:
-        console.print("[bold green]Nenhum segredo encontrado.[/]")
+        if not quiet:
+            console.print("[bold green]Nenhum segredo encontrado.[/]")
         raise typer.Exit(0)
     table = Table(title=f"Segredos ({len(findings)})", header_style="bold", expand=True)
     table.add_column("Sev.", no_wrap=True)
@@ -362,6 +475,7 @@ def secrets_cmd(
         table.add_row(f"[{SEV_STYLE[f.severity]}] {f.severity.value.upper()} [/]",
                       f.title.split(" em ")[0], f.evidence)
     console.print(table)
+    console.print("[dim]Falso positivo? Adicione 'tbm:allow' num comentário da linha ou o caminho no .tbmignore.[/]")
     raise typer.Exit(1 if fail else 0)
 
 
@@ -403,25 +517,24 @@ def diff(old: str, new: str) -> None:
     a, b = _load(store, old), _load(store, new)
     d = diff_scans(a, b)
     print_summary(b, d)
+    if d.opened_ports or d.closed_ports:
+        console.print("Portas abertas: " + (", ".join(port_label(p) for p in d.opened_ports) or "—"))
+        console.print("Portas fechadas: " + (", ".join(port_label(p) for p in d.closed_ports) or "—"))
     if d.new_findings:
-        console.print("[bold red]Novos[/]")
-        print_findings(d.new_findings)
+        print_findings(d.new_findings, title="[bold red]Novos[/]")
     if d.resolved_findings:
-        console.print("[bold green]Resolvidos[/]")
-        print_findings(d.resolved_findings)
+        print_findings(d.resolved_findings, title="[bold green]Resolvidos[/]")
 
 
 @app.command()
 def report(
     scan_id: str,
-    output: Annotated[Path, typer.Option("--output", "-o")] = Path("relatorio.html"),
+    output: Annotated[Path, typer.Option("--output", "-o", help=".html, .json ou .sarif")] = Path("relatorio.html"),
 ) -> None:
     """Gera o relatório de um scan do histórico (com diff contra o anterior)."""
     store = HistoryStore()
     result = _load(store, scan_id)
-    previous = store.latest(result.label, exclude=result.scan_id)
-    if previous and previous.started_at > result.started_at:
-        previous = None
+    previous = store.latest(result.label, exclude=result.scan_id, before=result.started_at.isoformat())
     write_report(result, output, diff_scans(previous, result))
     console.print(f"Relatório salvo em [bold]{output}[/]")
 
@@ -429,7 +542,7 @@ def report(
 @app.command("report-file")
 def report_file(
     input: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
-    output: Annotated[Path, typer.Option("--output", "-o")] = Path("relatorio.html"),
+    output: Annotated[Path, typer.Option("--output", "-o", help=".html, .json ou .sarif")] = Path("relatorio.html"),
 ) -> None:
     """Gera o relatório a partir de um JSON (saída do scout/sniff)."""
     result = ScanResult.model_validate_json(input.read_text(encoding="utf-8"))
@@ -437,6 +550,36 @@ def report_file(
         finalize(result)
     write_report(result, output)
     console.print(f"Relatório salvo em [bold]{output}[/]")
+
+
+@app.command()
+def dashboard(
+    host: Annotated[str, typer.Option(help="Interface de escuta. Mantenha 127.0.0.1: o histórico é sensível.")] = "127.0.0.1",
+    port: int = 8765,
+) -> None:
+    """Dashboard web com a evolução da nota e o histórico de scans."""
+    try:
+        import uvicorn
+
+        from tbm.dashboard import create_app
+    except ImportError as exc:
+        raise _fail('dependências do dashboard ausentes: pip install -e ".[web]"') from exc
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        err.print(f"[bold yellow]atenção:[/] escutando em {host}. O dashboard não tem autenticação "
+                  "e mostra o inventário da sua rede.")
+    console.print(f"Dashboard em [bold]http://{host}:{port}[/] (Ctrl+C para sair)")
+    uvicorn.run(create_app(HistoryStore()), host=host, port=port, log_level="warning")
+
+
+@app.command("update-oui")
+def update_oui() -> None:
+    """Baixa a base de fabricantes de placas de rede (IEEE OUI, ~3 MB)."""
+    with console.status("Baixando oui.csv do IEEE…"):
+        try:
+            n = _run(download_oui())
+        except Exception as exc:  # noqa: BLE001
+            raise _fail(f"falha ao baixar: {exc}") from exc
+    console.print(f"[green]{n} fabricantes[/] salvos em {OUIDatabase().path}")
 
 
 @app.command()

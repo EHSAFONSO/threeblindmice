@@ -1,0 +1,10 @@
+# Permite que OUTROS repositórios usem o tbm como hook:
+#   - repo: https://github.com/<você>/threeblindmice
+#     rev: v0.2.0
+#     hooks: [{id: tbm-secrets}]
+- id: tbm-secrets
+  name: threeblindmice · segredos vazados
+  description: Bloqueia commits com tokens, chaves privadas e senhas.
+  entry: tbm secrets --quiet
+  language: python
+  pass_filenames: true

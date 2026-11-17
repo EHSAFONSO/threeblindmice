@@ -1,0 +1,41 @@
+# Laboratório de integração: serviços vulneráveis DE PROPÓSITO, isolados numa
+# rede interna do Compose (nenhuma porta é publicada no host).
+#
+#   docker compose -f integration/compose.yml up --build --abort-on-container-exit --exit-code-from scanner
+#
+# O container "scanner" roda o pytest -m integration contra os outros pelo nome.
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--protected-mode", "no"]   # sem senha: alvo do check service.banner
+    networks: [lab]
+
+  ftp:
+    build: ./ftp            # vsftpd com login anônimo
+    networks: [lab]
+
+  web:
+    build: ./web            # nginx com autoindex, versão exposta e .git esquecido
+    networks: [lab]
+
+  ssh:
+    build: ./ssh            # OpenSSH com senha e cifra CBC
+    networks: [lab]
+
+  snmp:
+    build: ./snmp           # net-snmp com community "public"
+    networks: [lab]
+
+  scanner:
+    build:
+      context: ..
+      dockerfile: integration/Dockerfile.scanner
+    environment:
+      TBM_INTEGRATION: "1"
+    depends_on: [redis, ftp, web, ssh, snmp]
+    networks: [lab]
+
+networks:
+  lab:
+    internal: true          # sem saída para a internet

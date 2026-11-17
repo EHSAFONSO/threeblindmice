@@ -26,7 +26,9 @@ import httpx
 
 from tbm.asyncutil import RateLimiter
 from tbm.models import Finding, Host, Service, Severity
+from tbm.sniffer.backport import BackportResolver, DistroPackage, distro_package
 from tbm.sniffer.base import Check, CheckContext, register
+from tbm.sniffer.epss import EPSSClient
 
 NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
@@ -188,20 +190,35 @@ class NVDClient:
         return records
 
 
-def cve_finding(check_id: str, host: Host, svc: Service, rec: CVERecord) -> Finding:
+def cve_finding(
+    check_id: str,
+    host: Host,
+    svc: Service,
+    rec: CVERecord,
+    epss: float | None = None,
+    pkg: DistroPackage | None = None,
+) -> Finding:
     severity = Severity.CRITICAL if rec.kev else Severity.from_cvss(rec.score)
     desc = rec.description
     if rec.kev:
         desc = "⚠ Explorada ativamente (catálogo CISA KEV). " + desc
-    desc += (
-        "\n\nCorrespondência por versão anunciada no banner. Distros fazem backport de "
-        "correções sem mudar a versão, então confirme antes de concluir."
-    )
+    if epss is not None:
+        desc += f"\n\nEPSS: {epss:.1%} de chance de exploração nos próximos 30 dias."
+    if pkg and pkg.distro == "debian":
+        desc += (f"\n\nPacote Debian {pkg.version}: confirme se já foi corrigido em "
+                 f"https://security-tracker.debian.org/tracker/{rec.id}")
+    elif pkg:
+        desc += "\n\nO tracker do Ubuntu não confirmou correção para a versão instalada."
+    else:
+        desc += (
+            "\n\nCorrespondência pela versão anunciada no banner. Distros fazem backport de "
+            "correções sem mudar a versão, então confirme antes de concluir."
+        )
     return Finding(
         check_id=check_id,
         key=rec.id,
         severity=severity,
-        title=f"{rec.id} em {svc.label}",
+        title=f"{rec.id} em {svc.label}" + (f" · EPSS {epss:.0%}" if epss and epss >= 0.01 else ""),
         host=host.address,
         port=svc.port,
         description=desc,
@@ -209,29 +226,64 @@ def cve_finding(check_id: str, host: Host, svc: Service, rec: CVERecord) -> Find
         remediation=rec.kev_action or f"Atualize o {svc.product} para uma versão corrigida.",
         references=[rec.url],
         cvss=rec.score,
+        epss=epss,
+        kev=rec.kev,
     )
+
+
+def priority(rec: CVERecord, epss: dict[str, float]) -> tuple[bool, float, float]:
+    """KEV primeiro, depois probabilidade real de exploração, depois gravidade."""
+    return (rec.kev, epss.get(rec.id, 0.0), rec.score or 0.0)
 
 
 @register
 class CVECheck(Check):
     id = "cve.nvd"
-    name = "CVEs conhecidos (NVD)"
+    name = "CVEs conhecidos (NVD + EPSS + backport)"
 
     async def run(self, ctx: CheckContext) -> list[Finding]:
         if ctx.nvd is None:
             return []
-        groups: dict[tuple[str, str], list[tuple[Host, Service]]] = {}
+        epss_client = EPSSClient(ctx.http, ctx.options.cache_dir) if ctx.options.epss else None
+        backports = BackportResolver(ctx.http, ctx.options.cache_dir) if ctx.options.backport else None
+
+        # Agrupamos também pela revisão da distro: dois hosts com "8.2p1" podem
+        # estar em revisões diferentes do pacote Ubuntu.
+        groups: dict[tuple[str, str, str | None], list[tuple[Host, Service]]] = {}
         for host, svc in ctx.services(lambda s: bool(cpe_candidates(s.product, s.version))):
-            groups.setdefault((svc.product, svc.version), []).append((host, svc))  # type: ignore[arg-type]
+            pkg = distro_package(svc.banner)
+            key = (svc.product, svc.version, pkg.version if pkg else None)
+            groups.setdefault(key, []).append((host, svc))  # type: ignore[arg-type]
 
         findings: list[Finding] = []
-        for (product, version), locations in groups.items():
+        for (product, version, _), locations in groups.items():
+            pkg = distro_package(locations[0][1].banner)
             records: dict[str, CVERecord] = {}
             for cpe in cpe_candidates(product, version):
                 for rec in await ctx.nvd.search(cpe):
                     records[rec.id] = rec
-            top = sorted(records.values(), key=lambda r: (r.kev, r.score or 0), reverse=True)
-            top = top[: ctx.options.max_cves_per_service]
+
+            # EPSS só para os 100 mais graves: é enriquecimento, não precisa de tudo.
+            candidates = sorted(records.values(), key=lambda r: (r.kev, r.score or 0), reverse=True)[:100]
+            epss = await epss_client.scores([r.id for r in candidates]) if epss_client else {}
+            ranked = sorted(candidates, key=lambda r: priority(r, epss), reverse=True)
+
+            discarded: list[str] = []
+            if backports and pkg:
+                verdicts = await asyncio.gather(*(backports.is_fixed(r.id, pkg) for r in ranked[:40]))
+                fixed = {r.id for r, v in zip(ranked[:40], verdicts, strict=True) if v is True}
+                discarded = sorted(fixed)
+                ranked = [r for r in ranked if r.id not in fixed]
+
+            top = ranked[: ctx.options.max_cves_per_service]
             for host, svc in locations:
-                findings += [cve_finding(self.id, host, svc, rec) for rec in top]
+                findings += [cve_finding(self.id, host, svc, r, epss.get(r.id), pkg) for r in top]
+                if discarded:
+                    findings.append(Finding(
+                        check_id=self.id, key="backport", severity=Severity.INFO, host=host.address,
+                        port=svc.port, title=f"{len(discarded)} CVE(s) descartados: já corrigidos pela distro",
+                        description=f"O pacote {pkg.package} {pkg.version} já contém as correções, "  # type: ignore[union-attr]
+                                    "segundo o tracker de segurança do Ubuntu.",
+                        evidence=", ".join(discarded),
+                    ))
         return findings

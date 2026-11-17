@@ -62,6 +62,12 @@ def analyze_tls(
             "downgrade (BEAST, POODLE etc.).",
             "Aceita: " + ", ".join(sorted(legacy)),
             "Configure o mínimo como TLS 1.2 (de preferência, TLS 1.3).")
+    if tls.legacy_untestable and not legacy:
+        add("legacy-untestable", Severity.INFO, "Não foi possível testar TLS 1.0/1.1",
+            "O OpenSSL desta máquina não suporta esses protocolos, então não dá para afirmar se "
+            "o servidor os aceita. Ausência de achado aqui não é garantia.",
+            "Não testados: " + ", ".join(tls.legacy_untestable),
+            "Confirme com outra ferramenta, ex.: testssl.sh ou `openssl s_client -tls1`.")
     return out
 
 

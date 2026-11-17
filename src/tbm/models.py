@@ -68,6 +68,8 @@ class TLSInfo(BaseModel):
     signature_algorithm: str | None = None
     self_signed: bool = False
     legacy_protocols: list[str] = Field(default_factory=list)
+    # Protocolos que o OpenSSL *local* não consegue testar (evita falso negativo silencioso).
+    legacy_untestable: list[str] = Field(default_factory=list)
 
 
 class Service(BaseModel):
@@ -82,7 +84,7 @@ class Service(BaseModel):
 
     @property
     def is_http(self) -> bool:
-        return self.name in {"http", "https"}
+        return self.transport == "tcp" and self.name in {"http", "https"}
 
     @property
     def label(self) -> str:
@@ -93,14 +95,17 @@ class Service(BaseModel):
 class Host(BaseModel):
     address: str
     hostname: str | None = None
+    mac: str | None = None
+    vendor: str | None = None
     services: list[Service] = Field(default_factory=list)
 
-    def service(self, port: int) -> Service | None:
-        return next((s for s in self.services if s.port == port), None)
+    def service(self, port: int, transport: str = "tcp") -> Service | None:
+        return next((s for s in self.services if s.port == port and s.transport == transport), None)
 
     @property
     def display(self) -> str:
-        return f"{self.address} ({self.hostname})" if self.hostname else self.address
+        extras = [x for x in (self.hostname, self.vendor) if x]
+        return f"{self.address} ({' · '.join(extras)})" if extras else self.address
 
 
 class Finding(BaseModel):
@@ -109,11 +114,16 @@ class Finding(BaseModel):
     severity: Severity
     host: str
     port: int | None = None
+    transport: str = "tcp"
     description: str = ""
     evidence: str = ""
     remediation: str = ""
     references: list[str] = Field(default_factory=list)
     cvss: float | None = None
+    epss: float | None = None  # probabilidade de exploração em 30 dias (FIRST.org)
+    kev: bool = False  # no catálogo CISA de vulnerabilidades exploradas ativamente
+    file: str | None = None  # para achados em arquivos (segredos)
+    line: int | None = None
     # Discriminador para achados repetidos do mesmo check no mesmo alvo
     # (ex.: o ID do CVE, ou o arquivo:linha de um segredo).
     key: str = ""
@@ -127,10 +137,18 @@ class Finding(BaseModel):
 
     @property
     def location(self) -> str:
-        return f"{self.host}:{self.port}" if self.port is not None else self.host
+        if self.file:
+            return f"{self.file}:{self.line}" if self.line else self.file
+        if self.port is None:
+            return self.host
+        suffix = "/udp" if self.transport == "udp" else ""
+        return f"{self.host}:{self.port}{suffix}"
 
-    def sort_key(self) -> tuple[int, str, int]:
-        return (-self.severity.rank, self.host, self.port or 0)
+    def sort_key(self) -> tuple[int, int, float, str, int]:
+        return (-self.severity.rank, -int(self.kev), -(self.epss or 0.0), self.host, self.port or 0)
+
+
+PortKey = tuple[str, int, str]  # (host, porta, transporte)
 
 
 class ScanResult(BaseModel):
@@ -141,6 +159,7 @@ class ScanResult(BaseModel):
     targets: list[str] = Field(default_factory=list)
     scope: str = ""
     ports_scanned: list[int] = Field(default_factory=list)
+    udp_ports_scanned: list[int] = Field(default_factory=list)
     hosts: list[Host] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
@@ -157,5 +176,5 @@ class ScanResult(BaseModel):
         return next((h for h in self.hosts if h.address == address), None)
 
     @property
-    def open_ports(self) -> set[tuple[str, int]]:
-        return {(h.address, s.port) for h in self.hosts for s in h.services}
+    def open_ports(self) -> set[PortKey]:
+        return {(h.address, s.port, s.transport) for h in self.hosts for s in h.services}

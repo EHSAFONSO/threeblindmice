@@ -173,11 +173,12 @@ async def _exchange(
         data = b""
         speaks_first = port not in HTTP_PORTS and port != 6379
         if speaks_first:
-            data = await _read(reader, timeout)
+            # Quem fala primeiro (SSH, FTP, SMTP, MySQL) responde em milissegundos.
+            data = await _read(reader, min(timeout, 1.5))
         if not data:
             writer.write(_probe_for(port, sni or host, ctx is not None))
             await writer.drain()
-            data = await _read(reader, timeout * 2)
+            data = await _read(reader, timeout)
         return data, tls_info
     finally:
         writer.close()
@@ -197,13 +198,23 @@ def _needs_tls_retry(data: bytes) -> bool:
     return not data or data[:1] == b"\x15" or b"HTTPS port" in data or b"https://" in data[:300]
 
 
+# Protocolos binários que nunca mandam banner de texto nem falam TLS direto.
+# Sondar essas portas custava ~9s cada (espera passiva + sonda + tentativa TLS)
+# sem ganhar nada; quem analisa SMB/RDP de verdade são os checks do Sniffer.
+BINARY_PORTS = frozenset({88, 111, 135, 139, 445, 2049, 3389, 5357, 62078})
+
+
 async def grab_service(
     host: str, port: int, *, hostname: str | None, timeout: float, legacy_tls: bool
 ) -> Service:
+    if port in BINARY_PORTS:
+        return Service(port=port, name=SERVICE_NAMES.get(port))
+
     data: bytes = b""
     tls: TLSInfo | None = None
     first_try_tls = port in TLS_PORTS
-
+    # Importante contra DNS rebinding: conectamos sempre no IP já validado
+    # pelo escopo. O hostname só vai no SNI/Host, nunca é resolvido de novo.
     with suppress(TimeoutError, OSError, ssl.SSLError):
         data, tls = await _exchange(
             host, port, timeout, insecure_context() if first_try_tls else None, hostname
@@ -216,7 +227,9 @@ async def grab_service(
                 data, tls = tls_data, tls_info
 
     if tls is not None and legacy_tls:
-        tls.legacy_protocols = await probe_legacy_protocols(host, port, timeout)
+        tls.legacy_protocols, tls.legacy_untestable = await probe_legacy_protocols(
+            host, port, timeout
+        )
 
     ident = identify(port, data, tls is not None)
     return Service(

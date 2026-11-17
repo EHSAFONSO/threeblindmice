@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "threeblindmice"
-version = "0.1.0"
+version = "0.2.0"
 description = "Toolkit defensivo de avaliação de segurança: Scout (recon), Sniffer (análise) e Squeak (relatórios)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,10 +17,12 @@ dependencies = [
     "cryptography>=42",
     "jinja2>=3.1",
     "pyyaml>=6.0",
+    "paramiko>=3.4",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+web = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "threeblindmice[web]"]
 
 [project.scripts]
 tbm = "tbm.cli:app"
@@ -33,6 +35,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["integration: precisa do ambiente Docker Compose (TBM_INTEGRATION=1)"]
+filterwarnings = ["ignore:.*httpx2.*"]  # aviso interno do starlette.testclient
 
 [tool.ruff]
 line-length = 120

@@ -1,0 +1,15 @@
+# pip install pre-commit && pre-commit install
+# Hooks locais: usam o tbm e o ruff instalados no seu .venv.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: ruff check --fix
+        language: system
+        types: [python]
+      - id: tbm-secrets
+        name: tbm secrets (credenciais vazadas)
+        entry: tbm secrets --quiet
+        language: system
+        pass_filenames: true

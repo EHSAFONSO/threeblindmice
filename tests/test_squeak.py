@@ -41,9 +41,9 @@ def test_diff():
     assert [f.key for f in d.new_findings] == ["c"]
     assert [f.key for f in d.resolved_findings] == ["a"]
     assert [f.key for f in d.persisting_findings] == ["b"]
-    assert d.new_hosts == ["10.0.0.2"]
-    assert d.opened_ports == [("10.0.0.1", 443)]  # 10.0.0.2 é host novo, não "porta nova"
-    assert d.closed_ports == [("10.0.0.1", 80)]
+    assert [h.address for h in d.new_hosts] == ["10.0.0.2"]
+    assert d.opened_ports == [("10.0.0.1", 443, "tcp")]  # 10.0.0.2 é host novo, não "porta nova"
+    assert d.closed_ports == [("10.0.0.1", 80, "tcp")]
     assert d.score_delta == new.score - old.score
     assert d.has_changes
 
