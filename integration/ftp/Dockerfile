@@ -1,8 +1,14 @@
+# isolate/isolate_network=NO: por padrão o vsftpd cria namespaces novos a cada
+# sessão (clone com CLONE_NEWNET/NEWPID). Sem CAP_SYS_ADMIN no container, isso
+# falha e o processo morre com segfault (exit 139) na primeira conexão.
 FROM alpine:3.20
 RUN apk add --no-cache vsftpd \
     && mkdir -p /var/ftp/pub /var/run/vsftpd/empty \
     && printf '%s\n' \
        "listen=YES" \
+       "background=NO" \
+       "isolate=NO" \
+       "isolate_network=NO" \
        "anonymous_enable=YES" \
        "local_enable=NO" \
        "anon_root=/var/ftp" \

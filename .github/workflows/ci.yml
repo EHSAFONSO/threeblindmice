@@ -41,10 +41,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Testes de integração (Docker Compose)
-        run: |
-          docker compose -f integration/compose.yml up --build \
-            --abort-on-container-exit --exit-code-from scanner
+      # Serviços em segundo plano e só o scanner em primeiro plano: se um serviço
+      # cair, apenas o teste dele falha (com --abort-on-container-exit, um crash
+      # derrubava o scanner antes de qualquer assert).
+      - name: Sobe o laboratório
+        run: docker compose -f integration/compose.yml up -d --build redis ftp web ssh snmp
+      - name: Testes de integração
+        run: docker compose -f integration/compose.yml run --rm --build scanner
+      - name: Logs dos serviços (em caso de falha)
+        if: failure()
+        run: docker compose -f integration/compose.yml logs --no-color
       - if: always()
         run: docker compose -f integration/compose.yml down -v
 

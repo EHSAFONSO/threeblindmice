@@ -171,7 +171,9 @@ Os testes sobem servidores falsos em `127.0.0.1` (SSH, FTP, DNS), simulam NVD, E
 Integração com serviços reais (Redis sem senha, vsftpd anônimo, nginx com `.git`, OpenSSH com CBC, SNMP `public`), numa rede Docker isolada sem acesso à internet:
 
 ```bash
-docker compose -f integration/compose.yml up --build --abort-on-container-exit --exit-code-from scanner
+docker compose -f integration/compose.yml up -d --build redis ftp web ssh snmp
+docker compose -f integration/compose.yml run --rm --build scanner
+docker compose -f integration/compose.yml down -v
 ```
 
 O CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) roda lint, testes em Linux/Windows/macOS × Python 3.11–3.13, a integração e o `tbm secrets` com upload do SARIF.

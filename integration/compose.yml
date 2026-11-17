@@ -1,7 +1,9 @@
 # Laboratório de integração: serviços vulneráveis DE PROPÓSITO, isolados numa
 # rede interna do Compose (nenhuma porta é publicada no host).
 #
-#   docker compose -f integration/compose.yml up --build --abort-on-container-exit --exit-code-from scanner
+#   docker compose -f integration/compose.yml up -d --build redis ftp web ssh snmp
+#   docker compose -f integration/compose.yml run --rm --build scanner
+#   docker compose -f integration/compose.yml down -v
 #
 # O container "scanner" roda o pytest -m integration contra os outros pelo nome.
 
