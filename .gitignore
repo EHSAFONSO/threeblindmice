@@ -10,5 +10,6 @@ build/
 .tbm/
 reports/
 scope.yaml
+# relatórios gerados pelo tbm (os templates são .html.j2 e não casam com isto)
 *.html
-!src/tbm/squeak/templates/*.html.j2
+!integration/web/html/*.html
