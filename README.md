@@ -40,6 +40,17 @@ O destino dos alertas fica em `~/.threeblindmice/config.json`, legível só pelo
 
 A interface escuta só em `127.0.0.1` e exige o token de sessão que vem no link aberto pelo comando. As ações têm proteção contra CSRF e DNS rebinding (veja [security.py](src/tbm/dashboard/security.py)). O `tbm dashboard` continua existindo, somente leitura.
 
+### Aplicativo de desktop
+
+```bash
+pip install "threeblindmice[desktop]"
+tbm app                       # a mesma interface, numa janela própria
+tbm shortcut install          # atalho no menu Iniciar (Windows) ou no lançador (Linux)
+tbm shortcut install --desktop  # também na Área de Trabalho
+```
+
+No Windows e no Linux, o app fica com um **ícone na bandeja**. Fechar a janela só a esconde: scans em andamento continuam, e uma notificação avisa quando terminam. Para encerrar, use "Sair" no menu da bandeja (ou `tbm app --no-tray` para fechar junto com a janela). Abrir o app de novo reaproveita a instância que já está rodando.
+
 ## Uso pela linha de comando
 
 ```bash

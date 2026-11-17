@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "threeblindmice"
-version = "0.5.0"
+version = "0.6.0"
 description = "Toolkit defensivo de avaliação de segurança: Scout (recon), Sniffer (análise) e Squeak (relatórios)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,7 @@ dependencies = [
 
 [project.optional-dependencies]
 web = ["fastapi>=0.110", "uvicorn>=0.29"]
+desktop = ["threeblindmice[web]", "pywebview>=5", "pystray>=0.19", "Pillow>=10"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -29,6 +30,7 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "types-PyYAML",
+    "Pillow>=10",
     "threeblindmice[web]",
 ]
 
@@ -53,7 +55,8 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 
 [[tool.mypy.overrides]]
-module = ["paramiko", "paramiko.*"]
+# paramiko sem stubs; pywebview/pystray são opcionais (extra "desktop") e não ficam no CI
+module = ["paramiko", "paramiko.*", "webview", "webview.*", "pystray", "pystray.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

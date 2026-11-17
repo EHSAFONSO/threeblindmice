@@ -849,6 +849,63 @@ def gui(
     uvicorn.run(create_app(HistoryStore(), gui=settings), host="127.0.0.1", port=port, log_level="warning")
 
 
+@app.command("app")
+def desktop_app(
+    no_tray: Annotated[bool, typer.Option("--no-tray", help="Sem ícone na bandeja: fechar a janela encerra o app.")] = False,
+    smoke: Annotated[bool, typer.Option("--smoke", hidden=True)] = False,
+) -> None:
+    """[bold]Aplicativo de desktop:[/] a interface numa janela própria, com ícone na bandeja."""
+    try:
+        import webview  # noqa: F401
+
+        from tbm.desktop.app import DesktopApp
+    except ImportError as exc:
+        raise _fail('dependências do app ausentes: pip install "threeblindmice[desktop]"') from exc
+    runner = DesktopApp(tray_enabled=not no_tray, smoke=smoke)
+    code = runner.run()
+    if smoke:
+        console.print(runner.smoke_result)
+    raise typer.Exit(code)
+
+
+shortcut_app = typer.Typer(help="Atalho para abrir o app sem terminal (menu Iniciar / lançador).")
+app.add_typer(shortcut_app, name="shortcut")
+
+
+@shortcut_app.command("install")
+def shortcut_install(
+    desktop: Annotated[bool, typer.Option("--desktop", help="Também cria um atalho na Área de Trabalho.")] = False,
+) -> None:
+    """Cria o atalho "threeblindmice" no menu Iniciar (Windows) ou no lançador (Linux)."""
+    from tbm.desktop import shortcut
+
+    icon = None
+    try:
+        from tbm.desktop.icon import ensure_ico
+
+        icon = ensure_ico()
+    except ImportError:
+        pass  # sem Pillow: atalho com o ícone padrão do Python
+    plan = shortcut.build_plan(sys.platform, desktop=desktop, icon=icon)
+    if not plan.supported:
+        raise _fail(plan.message)
+    try:
+        shortcut.install(plan)
+    except RuntimeError as exc:
+        raise _fail(str(exc)) from exc
+    for p in plan.paths:
+        console.print(f"[green]Atalho criado:[/] {p}")
+
+
+@shortcut_app.command("remove")
+def shortcut_remove() -> None:
+    """Remove os atalhos criados pelo `tbm shortcut install`."""
+    from tbm.desktop import shortcut
+
+    removed = shortcut.remove(sys.platform)
+    console.print("\n".join(f"Removido: {p}" for p in removed) or "[dim]Nenhum atalho encontrado.[/]")
+
+
 @app.command("update-oui")
 def update_oui() -> None:
     """Baixa a base de fabricantes de placas de rede (IEEE OUI, ~3 MB)."""

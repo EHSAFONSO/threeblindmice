@@ -129,9 +129,11 @@ class BusyError(RuntimeError):
 
 
 class JobRunner:
-    def __init__(self, store: HistoryStore, executor: Executor = execute) -> None:
+    def __init__(self, store: HistoryStore, executor: Executor = execute,
+                 on_done: Callable[[Job], None] | None = None) -> None:
         self.store = store
         self.executor = executor
+        self.on_done = on_done  # ex.: notificação na bandeja do app de desktop
         self.jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._current: str | None = None
@@ -179,6 +181,11 @@ class JobRunner:
         finally:
             job.finished = utcnow()
             loop.close()
+            if self.on_done is not None:
+                try:
+                    self.on_done(job)
+                except Exception:  # noqa: BLE001,S110 (a notificação nunca derruba o scan)
+                    pass
 
 
 def summarize(result: ScanResult, diff: ScanDiff, report: Path, alerted: bool | None) -> dict[str, Any]:

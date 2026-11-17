@@ -16,7 +16,7 @@
         <td><span class="c">{{ r.critical or 0 }}</span> / <span class="h">{{ r.high or 0 }}</span> /
             <span class="m">{{ r.medium or 0 }}</span> / <span class="l">{{ r.low or 0 }}</span></td>
         <td>
-          <a href="/scan/{{ r.scan_id }}" target="_blank">relatório</a> ·
+          <a href="/scan/{{ r.scan_id }}">relatório</a> ·
           <button class="link" data-get="/partials/diff/{{ r.scan_id }}" data-target="#diff-{{ r.scan_id }}">o que mudou?</button>
         </td>
       </tr>
