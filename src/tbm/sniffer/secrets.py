@@ -111,7 +111,9 @@ def load_ignore(base: Path) -> list[str]:
     path = base / IGNORE_FILE
     if not path.is_file():
         return []
-    lines = (ln.strip() for ln in path.read_text(encoding="utf-8").splitlines())
+    # utf-8-sig: o PowerShell 5.1 e editores antigos gravam BOM; sem isto, a 1ª
+    # linha virava "﻿vendor/" e o padrão nunca casava (achado no teste e2e).
+    lines = (ln.strip() for ln in path.read_text(encoding="utf-8-sig").splitlines())
     return [ln.rstrip("/") for ln in lines if ln and not ln.startswith("#")]
 
 
@@ -188,7 +190,7 @@ def scan_paths(paths: list[Path], base: Path | None = None) -> list[Finding]:
             if is_ignored(rel, patterns):
                 continue
             try:
-                text = path.read_text(encoding="utf-8", errors="ignore")
+                text = path.read_text(encoding="utf-8-sig", errors="ignore")
             except OSError:
                 continue
             findings += scan_text(text, rel)

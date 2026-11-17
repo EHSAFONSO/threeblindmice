@@ -197,6 +197,16 @@ def test_secrets_pragma_ignore_and_location(tmp_path):
     assert f.location == "app.py:1"
 
 
+def test_tbmignore_with_bom(tmp_path):
+    """O PowerShell 5.1 grava UTF-8 com BOM; o .tbmignore tem que funcionar mesmo assim."""
+    (tmp_path / "vendor").mkdir()
+    (tmp_path / "vendor" / "lib.py").write_text(f'X = "{FAKE_GH}"', encoding="utf-8")
+    (tmp_path / "app.py").write_text(f'T = "{FAKE_GH}"', encoding="utf-8-sig")
+    (tmp_path / ".tbmignore").write_text("vendor/\n", encoding="utf-8-sig")
+    [f] = scan_paths([tmp_path], base=tmp_path)
+    assert f.file == "app.py" and "﻿" not in f.evidence
+
+
 def test_ignore_patterns():
     assert is_ignored("tests/x.py", ["tests"])
     assert is_ignored("a/b/yarn.lock", ["*.lock"])

@@ -122,6 +122,84 @@ async def test_send_webhook_uses_delivery():
     assert seen["url"] == "https://ntfy.sh/t" and b"Telnet" in seen["body"]
 
 
+async def test_notify_test_message_to_telegram():
+    from tbm.squeak.notify import send_test
+
+    seen = {}
+
+    def telegram(request):
+        seen["url"], seen["body"] = str(request.url), json.loads(request.content)
+        return httpx.Response(200, json={"ok": True})
+
+    status = await send_test("tg://123:ABC/42", transport=httpx.MockTransport(telegram))
+    assert status == 200 and seen["url"].endswith("/bot123:ABC/sendMessage")
+    assert seen["body"]["chat_id"] == "42" and "teste de conexão" in seen["body"]["text"]
+
+
+def test_telegram_chat_found_even_when_last_update_has_no_message():
+    """O bug relatado: ao tocar em Iniciar, o último update é my_chat_member (sem .message)."""
+    from tbm.squeak.telegram import chats_from_updates
+
+    updates = [
+        {"update_id": 1, "message": {"chat": {"id": 555, "type": "private", "first_name": "Ana"}, "text": "/start"}},
+        {"update_id": 2, "my_chat_member": {"chat": {"id": 555, "type": "private", "first_name": "Ana"}}},
+        {"update_id": 3, "my_chat_member": {"chat": {"id": -100123, "type": "supergroup", "title": "Família"}}},
+    ]
+    chats = chats_from_updates(updates)
+    assert [(c.id, c.title) for c in chats] == [(-100123, "Família"), (555, "Ana")]
+    assert chats_from_updates([{"update_id": 9, "my_chat_member": {"chat": {"id": 7}}}])[0].id == 7
+
+
+@pytest.mark.parametrize(
+    ("url", "message"),
+    [
+        ("tg://7123456789:AAHsecret/", "sem o chat_id"),
+        ("tg:///123", "sem o token"),
+        ("tg://semdoispontos/123", "incompleto"),
+        ("tg://7123456789:AAHsecret/abc", "chat_id do Telegram inválido"),
+    ],
+)
+def test_telegram_errors_are_specific_and_hide_token(url, message):
+    r, d = _result_and_diff()
+    with pytest.raises(ValueError) as exc:
+        build_delivery(url, r, d, [])
+    assert message in str(exc.value) and "AAHsecret" not in str(exc.value)
+
+
+async def test_telegram_api_helpers():
+    from tbm.squeak.telegram import TelegramError, bot_username, find_chats, looks_like_token
+
+    def api(request):
+        if request.url.path.endswith("/getMe"):
+            return httpx.Response(200, json={"ok": True, "result": {"username": "vigia_bot"}})
+        return httpx.Response(200, json={"ok": True, "result": [
+            {"my_chat_member": {"chat": {"id": 42, "type": "private", "first_name": "Eu"}}}]})
+
+    t = httpx.MockTransport(api)
+    assert await bot_username("1:x", transport=t) == "vigia_bot"
+    assert (await find_chats("1:x", transport=t))[0].id == 42
+    bad = httpx.MockTransport(lambda r: httpx.Response(
+        401, json={"ok": False, "error_code": 401, "description": "Unauthorized"}))
+    with pytest.raises(TelegramError, match="token inválido"):
+        await bot_username("1:x", transport=bad)
+    assert looks_like_token("7123456789:" + "A" * 35) and not looks_like_token("7123456789:AA")
+
+
+def test_notify_test_cli_never_prints_the_token(monkeypatch):
+    from typer.testing import CliRunner
+
+    from tbm.cli import app
+
+    async def fake_send(url):
+        return 401
+
+    monkeypatch.setattr("tbm.cli.send_test", fake_send)
+    monkeypatch.setenv("TBM_WEBHOOK", "tg://999:SEGREDO/1")
+    result = CliRunner().invoke(app, ["notify-test"])
+    assert result.exit_code == 2 and "token inválido" in result.output
+    assert "SEGREDO" not in result.output
+
+
 def test_accepted_findings_do_not_alert():
     r, d = _result_and_diff()
     for f in d.new_findings:
@@ -157,7 +235,18 @@ def test_schedule_windows_plan():
     [cmd] = plan.commands
     assert cmd[:4] == ["schtasks", "/Create", "/TN", task_name("casa")]
     assert cmd[cmd.index("/SC") + 1] == "HOURLY" and cmd[cmd.index("/MO") + 1] == "6"
-    assert "--label casa" in cmd[cmd.index("/TR") + 1] and "--udp" in cmd[cmd.index("/TR") + 1]
+    # /TR aponta para um .cmd curto; o comando longo (com webhook) vai dentro dele
+    tr = cmd[cmd.index("/TR") + 1]
+    assert tr.endswith('.cmd"') and len(tr) < 261
+    [(wrapper, script)] = plan.files.items()
+    assert "--label casa" in script and "--udp" in script
+
+
+def test_schedule_windows_long_webhook_fits():
+    hook = "https://discord.com/api/webhooks/" + "1" * 19 + "/" + "x" * 68
+    plan = build_plan("win32", ["192.168.100.0/24"], "casa", 3600, ["--notify", hook])
+    tr = plan.commands[0][plan.commands[0].index("/TR") + 1]
+    assert len(tr) < 261 and hook in next(iter(plan.files.values()))
     assert remove_plan("win32", "casa").commands[0][:2] == ["schtasks", "/Delete"]
 
 

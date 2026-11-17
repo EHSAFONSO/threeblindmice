@@ -11,7 +11,11 @@ from tbm.scout import Scout, ScoutOptions
 from tbm.sniffer import Sniffer, SnifferOptions
 from tbm.squeak import HistoryStore, ScanDiff, diff_scans, redact
 from tbm.squeak.acceptance import apply_acceptances
+from tbm.squeak.diff import mark_novelty
 from tbm.squeak.scoring import grade_for, score_findings
+
+# Quantos scans anteriores contam para decidir se um dispositivo/porta é inédito.
+NOVELTY_WINDOW = 10
 
 
 def finalize(result: ScanResult) -> ScanResult:
@@ -80,6 +84,9 @@ async def execute(job: ScanJob, store: HistoryStore, progress: ProgressHook | No
     if job.no_evidence:
         result = redact(result)
     diff = diff_scans(store.latest(job.label, exclude=result.scan_id), result)
+    recent = [s for r in store.list(job.label, NOVELTY_WINDOW)
+              if r["scan_id"] != result.scan_id and (s := store.get(r["scan_id"])) is not None]
+    mark_novelty(diff, result, recent)
     if job.save:
         store.save(result)
     return result, diff

@@ -13,6 +13,7 @@ Formatos de destino aceitos em --notify / TBM_WEBHOOK:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -44,10 +45,10 @@ def build_message(result: ScanResult, diff: ScanDiff, items: list[Finding]) -> s
         lines += [f"• [{f.severity.value.upper()}] {f.title} ({f.location})" for f in items[:15]]
         if len(items) > 15:
             lines.append(f"… e mais {len(items) - 15}")
-    if diff.new_hosts:
-        lines.append("Dispositivos novos na rede: " + ", ".join(h.display for h in diff.new_hosts[:10]))
-    if diff.opened_ports:
-        lines.append("Portas novas: " + ", ".join(port_label(p) for p in diff.opened_ports[:10]))
+    if diff.alert_hosts:
+        lines.append("Dispositivos novos na rede: " + ", ".join(h.display for h in diff.alert_hosts[:10]))
+    if diff.alert_ports:
+        lines.append("Portas novas: " + ", ".join(port_label(p) for p in diff.alert_ports[:10]))
     for ip, old_mac, new_mac in diff.mac_changes[:5]:
         lines.append(f"⚠ MAC de {ip} mudou: {old_mac} → {new_mac} (troca de aparelho ou ARP spoofing?)")
     if diff.resolved_findings:
@@ -77,8 +78,19 @@ def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[
     if parsed.scheme == "tg":
         # tg://<token>/<chat_id>: o token tem ':' e por isso vai inteiro no "netloc"
         token, chat_id = parsed.netloc, parsed.path.strip("/")
-        if not token or not chat_id:
-            raise ValueError("formato do Telegram: tg://<token-do-bot>/<chat_id>")
+        # Mensagens específicas, mas sem nunca ecoar o token.
+        if not token:
+            raise ValueError("TBM_WEBHOOK do Telegram sem o token. Formato: tg://<token-do-bot>/<chat_id>. "
+                             "Use `tbm telegram-setup` para configurar.")
+        if ":" not in token:
+            raise ValueError("o token do Telegram parece incompleto (deveria ter ':'). "
+                             "Use `tbm telegram-setup` para configurar.")
+        if not chat_id:
+            raise ValueError("TBM_WEBHOOK do Telegram sem o chat_id no final (tg://<token>/<chat_id>). "
+                             "Use `tbm telegram-setup` para descobrir o chat_id.")
+        if not re.fullmatch(r"-?\d+|@\w+", chat_id):
+            raise ValueError("chat_id do Telegram inválido: deveria ser um número (ex.: 123456789 ou -100…). "
+                             "Use `tbm telegram-setup`.")
         return Delivery(f"https://api.telegram.org/bot{token}/sendMessage",
                         json={"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": True})
 
@@ -104,8 +116,8 @@ def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[
         "score": result.score,
         "grade": result.grade,
         "new_findings": [f.model_dump(mode="json") for f in items],
-        "new_hosts": [h.model_dump(mode="json", exclude={"services"}) for h in diff.new_hosts],
-        "opened_ports": [port_label(p) for p in diff.opened_ports],
+        "new_hosts": [h.model_dump(mode="json", exclude={"services"}) for h in diff.alert_hosts],
+        "opened_ports": [port_label(p) for p in diff.alert_ports],
         "mac_changes": [{"ip": ip, "old": o, "new": n} for ip, o, n in diff.mac_changes],
     })
 
@@ -115,13 +127,31 @@ def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Find
     return build_delivery(url, result, diff, items).json or {}
 
 
+async def send_test(url: str, transport: httpx.AsyncBaseTransport | None = None) -> int:
+    """Manda uma mensagem de teste para o destino. Devolve o status HTTP.
+
+    Serve para validar a configuração (token, chat_id, tópico) sem esperar um
+    scan encontrar algo novo.
+    """
+    from tbm.models import Host  # import local: evita ciclo models ← notify
+
+    result = ScanResult(label="teste", score=100, grade="A")
+    diff = ScanDiff(previous_id=None, new_hosts=[Host(address="0.0.0.0", device_name="teste de conexão")])
+    d = build_delivery(url, result, diff, [])
+    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT},
+                                 transport=transport) as client:
+        resp = await client.post(d.url, json=d.json, content=d.content, headers=d.headers)
+    return resp.status_code
+
+
 async def send_webhook(
     url: str, result: ScanResult, diff: ScanDiff, min_severity: Severity = Severity.MEDIUM,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> bool:
     """Retorna True se enviou, False se não havia nada relevante."""
     items = relevant(diff, min_severity)
-    if not items and not diff.new_hosts and not diff.opened_ports and not diff.mac_changes:
+    # Só o inédito alerta (diff.alert_*): porta de celular que dorme e acorda não é novidade.
+    if not items and not diff.alert_hosts and not diff.alert_ports and not diff.mac_changes:
         return False
     d = build_delivery(url, result, diff, items)
     async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT},

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import date, datetime
@@ -37,7 +38,8 @@ from tbm.sniffer.secrets import scan_paths
 from tbm.squeak import HistoryStore, ScanDiff, diff_scans, send_webhook, write_report
 from tbm.squeak.acceptance import is_active
 from tbm.squeak.letter import build_letter
-from tbm.squeak.notify import port_label
+from tbm.squeak.notify import port_label, send_test
+from tbm.squeak.telegram import TelegramError, bot_username, find_chats, looks_like_token
 
 app = typer.Typer(
     name="tbm",
@@ -738,6 +740,91 @@ def schedule_remove(
         except RuntimeError as exc:
             raise _fail(str(exc)) from exc
         console.print("[green]Removido.[/]")
+
+
+@app.command("notify-test")
+def notify_test(notify: NotifyOpt = None) -> None:
+    """Envia uma mensagem de teste para o destino de alertas (ou para TBM_WEBHOOK)."""
+    target = notify or os.environ.get("TBM_WEBHOOK")
+    if not target:
+        raise _fail("informe --notify ou defina a variável TBM_WEBHOOK")
+    try:
+        status = _run(send_test(target))
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise _fail(f"falha ao enviar: {exc}") from exc
+    # Nunca imprimimos o destino: no Telegram, a URL contém o token do bot.
+    if 200 <= status < 300:
+        console.print("[green]Mensagem de teste enviada.[/] Confira no app.")
+    else:
+        hint = {401: "token inválido", 400: "chat_id errado ou você ainda não falou com o bot",
+                404: "token ou URL inválidos", 403: "o bot foi bloqueado ou removido do chat"}.get(status, "")
+        raise _fail(f"o destino respondeu HTTP {status}{f' ({hint})' if hint else ''}")
+
+
+@app.command("telegram-setup")
+def telegram_setup(
+    save: Annotated[bool | None, typer.Option("--save/--no-save", help="Grava TBM_WEBHOOK sem perguntar (ou não grava).")] = None,
+) -> None:
+    """Conecta o Telegram: valida o token, acha o chat_id, envia um teste e salva TBM_WEBHOOK."""
+    console.print("Crie o bot com o [bold]@BotFather[/] (/newbot) e copie o token.\n"
+                  "[dim]O token não aparece na tela enquanto você digita ou cola.[/]")
+    token = typer.prompt("Token do bot", hide_input=True).strip()
+    if not looks_like_token(token):
+        raise _fail("isso não parece um token de bot (formato 123456789:AAH…). Copie de novo do @BotFather.")
+    try:
+        username = _run(bot_username(token))
+    except TelegramError as exc:
+        raise _fail(str(exc)) from exc
+    console.print(f"Bot encontrado: [bold]@{username}[/]")
+
+    chats = []
+    for attempt in range(4):
+        try:
+            chats = _run(find_chats(token))
+        except TelegramError as exc:
+            raise _fail(str(exc)) from exc
+        if chats:
+            break
+        if attempt == 3:
+            raise _fail(f"nenhuma conversa encontrada. Abra https://t.me/{username}, toque em Iniciar "
+                        "e rode o comando de novo.")
+        typer.prompt(f"Abra https://t.me/{username} no Telegram, toque em Iniciar (ou mande 'oi') "
+                     "e pressione Enter aqui", default="", show_default=False)
+
+    chat = chats[0]
+    if len(chats) > 1:
+        for i, c in enumerate(chats, 1):
+            console.print(f"  {i}. {c.title} [dim]({c.kind}, id {c.id})[/]")
+        choice = typer.prompt("Qual conversa deve receber os alertas?", default=1, type=int)
+        if not 1 <= choice <= len(chats):
+            raise _fail("opção inválida")
+        chat = chats[choice - 1]
+    console.print(f"Conversa: [bold]{chat.title}[/] [dim]({chat.kind}, id {chat.id})[/]")
+
+    url = f"tg://{token}/{chat.id}"
+    status = _run(send_test(url))
+    if not 200 <= status < 300:
+        raise _fail(f"o Telegram recusou a mensagem de teste (HTTP {status}). O bot foi bloqueado?")
+    console.print("[green]Mensagem de teste enviada.[/] Confira no Telegram.")
+
+    if save is None:
+        save = typer.confirm("Salvar como TBM_WEBHOOK (variável do seu usuário, usada pelos scans e pelo agendador)?",
+                             default=True)
+    if not save:
+        console.print("[dim]Nada foi salvo. Use --notify tg://<token>/" + str(chat.id) + " nos comandos.[/]")
+        return
+    if sys.platform == "win32":
+        # setx grava em HKCU\Environment; o valor não aparece na tela nem no histórico.
+        proc = subprocess.run(["setx", "TBM_WEBHOOK", url], capture_output=True, text=True, check=False)
+        if proc.returncode != 0:
+            raise _fail("setx falhou: " + (proc.stderr or proc.stdout).strip())
+        console.print("[green]Salvo.[/] Vale para terminais [bold]novos[/] e para o agendador. "
+                      "Neste terminal, abra um novo ou rode o scan com --notify.")
+    else:
+        console.print("Adicione ao seu ~/.bashrc ou ~/.zshrc (troque <token> pelo token do bot):\n"
+                      f"  export TBM_WEBHOOK='tg://<token>/{chat.id}'", markup=False)
 
 
 @app.command("update-oui")

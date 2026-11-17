@@ -131,6 +131,54 @@ def test_ip_change_is_not_new_device_and_keeps_findings():
     assert (before, after) == ("10.0.0.20", "10.0.0.31") and host.mac == "3a:11:22:33:44:55"
 
 
+def test_udp_flapping_is_not_a_port_change():
+    """Caso real: o mDNS do .182 não respondeu num scan e respondeu no seguinte."""
+    with_mdns = Host(address="192.168.100.182", mac="44:d5:cc:67:7e:85",
+                     services=[Service(port=8009), Service(port=5353, transport="udp")])
+    silent = with_mdns.model_copy(update={"services": [Service(port=8009)]})
+    common = dict(ports_scanned=[8009], udp_ports_scanned=[5353])
+    a = ScanResult(hosts=[with_mdns], **common)
+    b = ScanResult(hosts=[silent], **common)
+    assert diff_scans(a, b).closed_ports == [] and diff_scans(b, a).opened_ports == []
+
+
+async def test_flapping_phone_port_does_not_alert_again():
+    """Caso real: a 62078 do iPhone fecha quando ele dorme e reabre depois."""
+    import httpx
+
+    from tbm.squeak.diff import mark_novelty
+    from tbm.squeak.notify import send_webhook
+
+    awake = Host(address="192.168.100.251", mac="f2:10:9a:00:5b:74",
+                 services=[Service(port=49152), Service(port=62078)])
+    asleep = awake.model_copy(update={"services": [Service(port=49152)]})
+    ports = dict(ports_scanned=[22, 49152, 62078])
+    s1, s2, s3 = (finalize(ScanResult(hosts=[h], **ports)) for h in (awake, asleep, awake))
+
+    d = mark_novelty(diff_scans(s2, s3), s3, history=[s1, s2])
+    assert d.opened_ports == [("192.168.100.251", 62078, "tcp")]  # o relatório mostra a mudança
+    assert d.alert_ports == []                                    # mas não é inédita: sem alerta
+    posts = []
+    sent = await send_webhook("https://example.invalid/h", s3, d,
+                              transport=httpx.MockTransport(lambda r: posts.append(r) or httpx.Response(200)))
+    assert not sent and not posts
+
+    # Uma porta realmente nova continua alertando
+    new_port = awake.model_copy(update={"services": [*awake.services, Service(port=22)]})
+    s4 = finalize(ScanResult(hosts=[new_port], **{"ports_scanned": [22, 49152, 62078]}))
+    d4 = mark_novelty(diff_scans(s3, s4), s4, history=[s1, s2, s3])
+    assert d4.alert_ports == [("192.168.100.251", 22, "tcp")]
+
+
+def test_returning_device_is_not_alerted_as_new():
+    from tbm.squeak.diff import mark_novelty
+
+    phone = _phone("10.0.0.20")
+    home, away, back = (ScanResult(hosts=h) for h in ([phone], [], [phone]))
+    d = mark_novelty(diff_scans(away, back), back, history=[home, away])
+    assert len(d.new_hosts) == 1 and d.alert_hosts == []
+
+
 def test_upgrade_from_ip_fingerprints_does_not_flood_alerts():
     """Scan antigo (sem `device`) x scan novo (com `device`): nada deve parecer novo."""
     legacy = Finding(check_id="service.exposed", title="Telnet", severity=Severity.HIGH,

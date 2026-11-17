@@ -26,6 +26,17 @@ class ScanDiff:
     # Mesmo IP com MAC diferente: troca de aparelho, DHCP... ou ARP spoofing.
     mac_changes: list[tuple[str, str | None, str | None]] = field(default_factory=list)
     score_delta: int | None = None
+    # O que é inédito no histórico recente (ver mark_novelty). None = não calculado.
+    novel_hosts: list[Host] | None = None
+    novel_ports: list[PortKey] | None = None
+
+    @property
+    def alert_hosts(self) -> list[Host]:
+        return self.new_hosts if self.novel_hosts is None else self.novel_hosts
+
+    @property
+    def alert_ports(self) -> list[PortKey]:
+        return self.opened_ports if self.novel_ports is None else self.novel_ports
 
     @property
     def has_changes(self) -> bool:
@@ -35,6 +46,25 @@ class ScanDiff:
 
 def _ports(host: Host) -> set[tuple[int, str]]:
     return {(s.port, s.transport) for s in host.services}
+
+
+def mark_novelty(diff: ScanDiff, new: ScanResult, history: list[ScanResult]) -> ScanDiff:
+    """Separa o que mudou desde o último scan do que é *inédito* no histórico recente.
+
+    O relatório mostra toda mudança. O alerta só deve tocar para o inédito.
+    No teste real, a porta 62078 de um iPhone abria e fechava conforme o
+    aparelho dormia, e cada vez que reabria gerava um alerta de "porta nova".
+    Celulares que saem e voltam para casa causariam o mesmo com "dispositivo novo".
+    """
+    seen_devices = {h.identity for s in history for h in s.hosts}
+    seen_ports = {(h.identity, svc.port, svc.transport) for s in history for h in s.hosts for svc in h.services}
+    by_ip = {h.address: h for h in new.hosts}
+    diff.novel_hosts = [h for h in diff.new_hosts if h.identity not in seen_devices]
+    diff.novel_ports = [
+        p for p in diff.opened_ports
+        if p[0] not in by_ip or (by_ip[p[0]].identity, p[1], p[2]) not in seen_ports
+    ]
+    return diff
 
 
 def legacy_key(f: Finding) -> str:
@@ -64,10 +94,13 @@ def diff_scans(old: ScanResult | None, new: ScanResult) -> ScanDiff:
         tcp = set(old.ports_scanned) & set(new.ports_scanned)
     else:
         tcp = {p for _, p, t in old.open_ports | new.open_ports if t == "tcp"}
-    udp = set(old.udp_ports_scanned) & set(new.udp_ports_scanned)
 
     def comparable(port: int, transport: str) -> bool:
-        return port in (udp if transport == "udp" else tcp)
+        # UDP fica de fora: silêncio em UDP é ambíguo (pacote perdido, aparelho em
+        # repouso). No teste real, o mDNS de um dispositivo Matter "fechou" e "abriu"
+        # entre scans seguidos, o que no `watch` viraria alerta falso. O que importa
+        # em UDP já alerta pelos achados (ex.: SNMP 'public' é um achado HIGH novo).
+        return transport == "tcp" and port in tcp
 
     opened: list[PortKey] = []
     closed: list[PortKey] = []

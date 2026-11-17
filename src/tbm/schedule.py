@@ -47,6 +47,10 @@ def scan_argv(targets: list[str], label: str, extra: list[str]) -> list[str]:
     return [tbm_executable(), "scan", *targets, "--label", label, "--report", str(report), *extra]
 
 
+def windows_wrapper(label: str) -> Path:
+    return tbm_home() / "schedules" / f"{task_name(label)}.cmd"
+
+
 def _windows_schedule(seconds: int) -> list[str]:
     if seconds % 86400 == 0:
         return ["/SC", "DAILY", "/MO", str(seconds // 86400)]
@@ -63,15 +67,18 @@ def build_plan(platform: str, targets: list[str], label: str, seconds: int,
         warnings.append("A URL do --notify fica gravada na definição da tarefa. Trate-a como segredo.")
 
     if platform == "win32":
-        command = subprocess.list2cmdline(argv)
-        if len(command) > 261:
-            warnings.append("O comando passa de 261 caracteres, limite do schtasks /TR.")
+        # O /TR do schtasks aceita no máximo 261 caracteres, e só a URL de um webhook
+        # do Discord já tem ~120. A tarefa chama um .cmd curto, e o comando completo
+        # fica nele (em TBM_HOME, dentro do perfil do usuário).
+        wrapper = windows_wrapper(label)
+        script = "@echo off\r\nREM gerado por `tbm schedule install`\r\n" + subprocess.list2cmdline(argv) + "\r\n"
         return SchedulePlan(
             platform="Windows (Agendador de Tarefas)",
             description=f"tarefa '{task_name(label)}' a cada {seconds}s",
-            commands=[["schtasks", "/Create", "/TN", task_name(label), "/TR", command,
+            files={wrapper: script},
+            commands=[["schtasks", "/Create", "/TN", task_name(label), "/TR", f'"{wrapper}"',
                        *_windows_schedule(seconds), "/F"]],
-            warnings=warnings,
+            warnings=[w.replace("definição da tarefa", str(wrapper)) for w in warnings],
         )
 
     if platform.startswith("linux") and shutil.which("systemctl"):
@@ -109,7 +116,8 @@ def remove_plan(platform: str, label: str) -> SchedulePlan:
     name = task_name(label)
     if platform == "win32":
         return SchedulePlan("Windows (Agendador de Tarefas)", f"remover '{name}'",
-                            commands=[["schtasks", "/Delete", "/TN", name, "/F"]])
+                            commands=[["schtasks", "/Delete", "/TN", name, "/F"]],
+                            manual=f"Depois, apague {windows_wrapper(label)}")
     if platform.startswith("linux") and shutil.which("systemctl"):
         unit_dir = Path.home() / ".config" / "systemd" / "user"
         return SchedulePlan("Linux (systemd --user)", f"remover '{name}.timer'",
