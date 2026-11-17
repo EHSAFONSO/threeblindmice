@@ -12,8 +12,9 @@ import asyncio
 import socket
 from contextlib import suppress
 from enum import Enum
+from functools import partial
 
-from tbm.asyncutil import gather_limited
+from tbm.asyncutil import RateLimiter, gather_limited
 
 
 class PortState(str, Enum):
@@ -35,8 +36,12 @@ async def probe(host: str, port: int, timeout: float) -> PortState:
     return PortState.OPEN
 
 
-async def guarded_probe(sem: asyncio.Semaphore, host: str, port: int, timeout: float) -> PortState:
+async def guarded_probe(
+    sem: asyncio.Semaphore, host: str, port: int, timeout: float, limiter: RateLimiter | None = None
+) -> PortState:
     async with sem:
+        if limiter is not None:  # modo --gentle: limita conexões por segundo
+            await limiter.acquire()
         return await probe(host, port, timeout)
 
 
@@ -47,29 +52,32 @@ async def scan_ports(
     timeout: float,
     sem: asyncio.Semaphore,
     on_done=None,
+    limiter: RateLimiter | None = None,
 ) -> list[int]:
     async def one(port: int) -> int | None:
-        state = await guarded_probe(sem, host, port, timeout)
+        state = await guarded_probe(sem, host, port, timeout, limiter)
         if on_done:
             on_done()
         return port if state is PortState.OPEN else None
 
     # O semáforo global limita sockets; este limite só evita criar
     # 65535 corrotinas por host quando o usuário pede --ports all.
-    results = await gather_limited((lambda p=p: one(p) for p in ports), limit=1024)
+    results = await gather_limited((partial(one, p) for p in ports), limit=1024)
     return [p for p in results if p is not None]
 
 
 DISCOVERY_PORTS = (80, 443, 22, 445, 139, 135, 3389, 53, 8080, 62078, 5357, 7000)
 
 
-async def is_alive(host: str, timeout: float, sem: asyncio.Semaphore) -> bool:
+async def is_alive(
+    host: str, timeout: float, sem: asyncio.Semaphore, limiter: RateLimiter | None = None
+) -> bool:
     """Host está vivo se *qualquer* porta responder, mesmo com RST.
 
-    Sem ICMP (que exigiria raw sockets); é a mesma ideia do 'TCP ping' do nmap.
-    Cancelamos o resto das sondas assim que uma responde.
+    É a mesma ideia do 'TCP ping' do nmap. Cancelamos o resto das sondas assim
+    que uma responde. O ping ICMP e a tabela ARP complementam (scout/discovery.py).
     """
-    tasks = [asyncio.create_task(guarded_probe(sem, host, p, timeout)) for p in DISCOVERY_PORTS]
+    tasks = [asyncio.create_task(guarded_probe(sem, host, p, timeout, limiter)) for p in DISCOVERY_PORTS]
     try:
         for next_done in asyncio.as_completed(tasks):
             if await next_done in (PortState.OPEN, PortState.CLOSED):

@@ -81,10 +81,12 @@ def analyze_response(host: str, port: int, url: str, resp: httpx.Response) -> li
 
     if not is_https:
         if _PASSWORD_INPUT.search(body):
+            # Severidade final (LAN x internet) é decidida em sniffer/context.py.
             add("http.cleartext-login", Severity.HIGH, "Formulário de senha via HTTP",
                 "Senhas digitadas nesta página trafegam em texto puro pela rede.",
                 f"{url} contém <input type=password>",
-                "Sirva a aplicação só por HTTPS e redirecione o HTTP.")
+                "Sirva a aplicação só por HTTPS e redirecione o HTTP. Em roteadores domésticos, "
+                "procure a opção de HTTPS na administração ou restrinja o acesso ao cabo.")
         elif not (resp.is_redirect and h.get("location", "").startswith("https://")):
             add("http.no-https", Severity.INFO, "HTTP sem redirecionamento para HTTPS",
                 "O serviço responde em texto puro.", url,

@@ -39,6 +39,14 @@ def test_https_on_unknown_port():
     assert ident.name == "https"
 
 
+def test_banner_keeps_only_text():
+    from tbm.scout.banner import _clean_banner, _protocol_banner
+
+    dropbear = b"SSH-2.0-dropbear_2020.80\r\n\x00\x00\x01\xbc\x07\x14\xa7\xe6\x10curve25519-sha256"
+    assert _clean_banner(_protocol_banner("ssh", dropbear)) == "SSH-2.0-dropbear_2020.80"
+    assert _clean_banner(b"220 ok\xbc\xe6") == "220 ok.."  # Latin-1 "imprimível" vira ponto
+
+
 def test_telnet_iac():
     assert identify(2323, b"\xff\xfd\x18\xff\xfd\x20", False).name == "telnet"
 

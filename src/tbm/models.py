@@ -97,15 +97,32 @@ class Host(BaseModel):
     hostname: str | None = None
     mac: str | None = None
     vendor: str | None = None
+    device_type: str | None = None  # "roteador/modem", "celular Apple", "impressora"...
+    device_name: str | None = None  # nome anunciado via mDNS/SSDP (ex.: "iPhone-de-Ana")
+    discovery: dict[str, str] = Field(default_factory=dict)  # mdns, ssdp, http_title, como foi achado
     services: list[Service] = Field(default_factory=list)
 
     def service(self, port: int, transport: str = "tcp") -> Service | None:
         return next((s for s in self.services if s.port == port and s.transport == transport), None)
 
     @property
+    def identity(self) -> str:
+        """Identidade estável entre scans, independente do IP que o DHCP deu.
+
+        MAC primeiro: mesmo o MAC "aleatório" de celulares é fixo por rede Wi-Fi
+        (iOS/Android usam um endereço privado por SSID). Sem MAC (host atrás de
+        roteador), o nome anunciado. Em último caso, o IP.
+        """
+        if self.mac:
+            return f"mac:{self.mac}"
+        if self.device_name:
+            return f"name:{self.device_name.lower()}"
+        return f"ip:{self.address}"
+
+    @property
     def display(self) -> str:
-        extras = [x for x in (self.hostname, self.vendor) if x]
-        return f"{self.address} ({' · '.join(extras)})" if extras else self.address
+        extras = [x for x in (self.device_name or self.hostname, self.device_type, self.vendor) if x]
+        return f"{self.address} ({' · '.join(dict.fromkeys(extras))})" if extras else self.address
 
 
 class Finding(BaseModel):
@@ -127,12 +144,17 @@ class Finding(BaseModel):
     # Discriminador para achados repetidos do mesmo check no mesmo alvo
     # (ex.: o ID do CVE, ou o arquivo:linha de um segredo).
     key: str = ""
+    # Identidade do dispositivo (Host.identity). Com ela, o fingerprint não muda
+    # quando o DHCP troca o IP do aparelho.
+    device: str | None = None
+    accepted: bool = False  # risco aceito com `tbm accept`: aparece, mas não conta na nota
+    acceptance: str | None = None  # motivo e validade da aceitação
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def fingerprint(self) -> str:
         """ID estável entre scans. É o que o diff usa para saber se é novo ou resolvido."""
-        raw = f"{self.check_id}|{self.host}|{self.port}|{self.key}"
+        raw = f"{self.check_id}|{self.device or self.host}|{self.port}|{self.key}"
         return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
     @property

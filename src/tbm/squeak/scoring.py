@@ -45,7 +45,8 @@ def weight(f: Finding) -> float:
 
 
 def penalty(findings: Iterable[Finding]) -> float:
-    return sum(weight(f) for f in findings)
+    # Riscos aceitos (`tbm accept`) aparecem no relatório, mas não pesam na nota.
+    return sum(weight(f) for f in findings if not f.accepted)
 
 
 def score_findings(findings: Iterable[Finding]) -> int:

@@ -1,0 +1,29 @@
+{% extends "base.html.j2" %}
+{% block title %}Dispositivos · {{ label }}{% endblock %}
+{% block content %}
+<section style="margin-top:22px">
+  <h2>Dispositivos · {{ label }}</h2>
+  <p class="muted">Último scan <code>{{ scan.scan_id }}</code> em {{ scan.started_at.strftime("%d/%m/%Y %H:%M") }} ·
+    {{ devices | length }} dispositivo(s) · histórico de {{ scans_seen }} scan(s).
+    A identidade usa o MAC (ou o nome anunciado), então um aparelho que trocou de IP continua sendo o mesmo.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Dispositivo</th><th>IP</th><th>MAC / fabricante</th><th>Portas</th><th>Achados</th><th>Visto</th></tr></thead>
+    <tbody>
+    {% for d in devices %}
+      <tr>
+        <td><b>{{ d.host.device_name or d.host.hostname or "—" }}</b><br>
+            <span class="muted">{{ d.host.device_type or "tipo desconhecido" }}</span>
+            {% for s in d.services %}<br><span class="tag">{{ s }}</span>{% endfor %}</td>
+        <td><code>{{ d.host.address }}</code>{% if d.ips | length > 1 %}<br><span class="muted">antes: {{ d.ips[:-1] | join(", ") }}</span>{% endif %}</td>
+        <td>{% if d.host.mac %}<code>{{ d.host.mac }}</code><br><span class="muted">{{ d.host.vendor or "fabricante desconhecido" }}</span>{% else %}—{% endif %}</td>
+        <td>{% for s in d.host.services %}<code>{{ s.port }}{% if s.transport == "udp" %}/udp{% endif %}</code> {% else %}<span class="muted">nenhuma</span>{% endfor %}</td>
+        <td>{% if d.counts.critical %}<span class="c">{{ d.counts.critical }}C</span> {% endif %}{% if d.counts.high %}<span class="h">{{ d.counts.high }}H</span> {% endif %}{% if d.counts.medium %}<span class="m">{{ d.counts.medium }}M</span> {% endif %}{% if d.counts.low %}<span class="l">{{ d.counts.low }}L</span>{% endif %}{% if not d.total %}<span class="muted">—</span>{% endif %}{% if d.accepted %}<br><span class="muted">{{ d.accepted }} aceito(s)</span>{% endif %}</td>
+        <td><span class="muted">1º: {{ d.first_seen }}<br>{{ d.times_seen }}× de {{ scans_seen }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

@@ -271,7 +271,11 @@ def test_dashboard_routes(tmp_path):
     store, scans = _saved_store(tmp_path)
     client = TestClient(create_app(store))
     home = client.get("/")
-    assert home.status_code == 200 and "casa" in home.text and "htmx" in home.text
+    assert home.status_code == 200 and "casa" in home.text and "data-get" in home.text
+    assert "<script src=" not in home.text  # nada externo: funciona offline
+    inv = client.get("/inventory/casa")
+    assert inv.status_code == 200 and "10.0.0.3" in inv.text and "Dispositivos" in inv.text
+    assert client.get("/inventory/naoexiste").status_code == 404
     panel = client.get("/partials/label/casa")
     assert "<svg" in panel.text and scans[1].scan_id in panel.text
     diff = client.get(f"/partials/diff/{scans[1].scan_id}")

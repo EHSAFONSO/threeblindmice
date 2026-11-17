@@ -7,9 +7,9 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -19,12 +19,13 @@ from rich.progress import (
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
+    TaskID,
     TextColumn,
     TimeElapsedColumn,
 )
 from rich.table import Table
 
-from tbm import __version__
+from tbm import __version__, schedule
 from tbm.models import Finding, Host, ScanResult, Severity
 from tbm.paths import cache_dir
 from tbm.pipeline import ScanJob, execute, finalize, run_sniffer
@@ -34,6 +35,8 @@ from tbm.scout.arp import OUIDatabase, download_oui
 from tbm.sniffer import REGISTRY, SnifferOptions
 from tbm.sniffer.secrets import scan_paths
 from tbm.squeak import HistoryStore, ScanDiff, diff_scans, send_webhook, write_report
+from tbm.squeak.acceptance import is_active
+from tbm.squeak.letter import build_letter
 from tbm.squeak.notify import port_label
 
 app = typer.Typer(
@@ -72,7 +75,7 @@ class RichProgress:
     def __init__(self, progress: Progress, verbose: bool = False) -> None:
         self.progress = progress
         self.verbose = verbose
-        self.tasks: dict[str, int] = {}
+        self.tasks: dict[str, TaskID] = {}
 
     def start(self, phase: str, total: int) -> None:
         if phase in self.tasks:  # chamadas repetidas somam ao total
@@ -142,13 +145,22 @@ def _sniffer_options(active: bool, no_cve: bool, secrets: Path | None, disable: 
 
 
 def _scout_options(ports: str, timeout: float, concurrency: int, no_discovery: bool,
-                   udp: bool = False, no_mac: bool = False) -> ScoutOptions:
+                   udp: bool = False, no_mac: bool = False, gentle: bool = False,
+                   rate: float | None = None, no_ping: bool = False,
+                   no_multicast: bool = False) -> ScoutOptions:
     try:
         port_list = parse_ports(ports)
     except ValueError as exc:
         raise _fail(str(exc)) from exc
-    return ScoutOptions(ports=port_list, timeout=timeout, concurrency=concurrency,
-                        discovery=not no_discovery, udp=udp, mac_lookup=not no_mac)
+    common: dict[str, Any] = dict(timeout=timeout, discovery=not no_discovery, udp=udp,
+                                  mac_lookup=not no_mac, ping=not no_ping, multicast=not no_multicast)
+    if gentle:
+        opts = ScoutOptions.gentle(port_list, **common)
+    else:
+        opts = ScoutOptions(ports=port_list, concurrency=concurrency, **common)
+    if rate:
+        opts.rate = rate
+    return opts
 
 
 def parse_interval(text: str) -> int:
@@ -199,14 +211,19 @@ def print_findings(findings: list[Finding], limit: int = 50, title: str = "Achad
     table.add_column("Sev.", no_wrap=True)
     table.add_column("Achado", ratio=3)
     table.add_column("Local", no_wrap=True)
+    table.add_column("id", no_wrap=True, style="dim")
     for f in findings[:limit]:
         badge = f"[{SEV_STYLE[f.severity]}] {f.severity.value.upper()} [/]"
         if f.kev:
             badge += " [bold red]KEV[/]"
-        table.add_row(badge, f.title, f.location)
+        if f.accepted:
+            badge = f"[dim]{f.severity.value.upper()} aceito[/]"
+        table.add_row(badge, f"[dim]{f.title}[/]" if f.accepted else f.title, f.location, f.fingerprint[:8])
     console.print(table)
     if len(findings) > limit:
         console.print(f"[dim]… mais {len(findings) - limit} achados no relatório.[/]")
+    if any(not f.accepted for f in findings[:limit]):
+        console.print("[dim]Risco que você não pode corrigir? tbm accept <id> -l <rótulo> -r \"motivo\"[/]")
 
 
 def print_summary(result: ScanResult, diff: ScanDiff | None = None) -> None:
@@ -230,14 +247,18 @@ def print_summary(result: ScanResult, diff: ScanDiff | None = None) -> None:
             f"{len(diff.new_hosts)} dispositivo(s) novo(s), {len(diff.opened_ports)} porta(s) nova(s)"
         )
         lines += [f"  [yellow]+ {h.display}[/]" for h in diff.new_hosts[:5]]
+        lines += [f"  [dim]↔ {h.device_name or h.mac}: {a} → {b}[/]" for h, a, b in diff.ip_changes[:5]]
         lines += [f"  [bold red]⚠ MAC de {ip} mudou: {o} → {n}[/]" for ip, o, n in diff.mac_changes]
+    accepted = sum(1 for f in result.findings if f.accepted)
+    if accepted:
+        lines.append(f"[dim]{accepted} risco(s) aceito(s) fora da nota (tbm accepted)[/]")
     if result.errors:
         lines.append(f"[yellow]{len(result.errors)} erro(s) em checks; veja o relatório.[/]")
     console.print(Panel("\n".join(lines), title=f"Squeak · {result.label}", expand=False))
 
 
 def _exit_code(findings: list[Finding], fail_on: Severity | None) -> int:
-    if fail_on and any(f.severity.rank >= fail_on.rank for f in findings):
+    if fail_on and any(f.severity.rank >= fail_on.rank and not f.accepted for f in findings):
         return 1
     return 0
 
@@ -270,7 +291,11 @@ NoBackportOpt = Annotated[bool, typer.Option("--no-backport", help="Não consult
 SecretsOpt = Annotated[Path | None, typer.Option("--secrets", help="Também procura segredos neste diretório.", exists=True)]
 DisableOpt = Annotated[list[str], typer.Option("--disable", "-x", help="Desativa um check ou grupo (ex.: http, cve.nvd).")]
 MaxCvesOpt = Annotated[int, typer.Option(help="Máximo de CVEs por serviço.")]
-NotifyOpt = Annotated[str | None, typer.Option(help="URL de webhook (Discord, Slack ou genérico). Também lê TBM_WEBHOOK.")]
+NotifyOpt = Annotated[str | None, typer.Option(help="Destino do alerta: URL do Discord/Slack, tg://<token>/<chat>, ntfy://<tópico> ou webhook JSON. Também lê TBM_WEBHOOK.")]
+GentleOpt = Annotated[bool, typer.Option("--gentle", help="Modo cuidadoso para IoT frágil: 16 sockets, 50 conexões/s.")]
+RateOpt = Annotated[float | None, typer.Option("--rate", help="Máximo de conexões TCP por segundo.")]
+NoPingOpt = Annotated[bool, typer.Option("--no-ping", help="Descoberta sem ping ICMP.")]
+NoMcastOpt = Annotated[bool, typer.Option("--no-multicast", help="Descoberta sem mDNS/SSDP por multicast.")]
 MinSevOpt = Annotated[Severity, typer.Option(help="Severidade mínima para alertar.")]
 NoEvidenceOpt = Annotated[bool, typer.Option("--no-evidence", help="Não grava banners e trechos de evidência (histórico e relatório).")]
 VerboseOpt = Annotated[bool, typer.Option("--verbose", "-v")]
@@ -303,6 +328,10 @@ def scan(
     fail_on: Annotated[Severity | None, typer.Option(help="Sai com código 1 se houver achado com esta severidade ou maior (bom para CI).")] = None,
     no_save: Annotated[bool, typer.Option("--no-save", help="Não grava no histórico.")] = False,
     no_evidence: NoEvidenceOpt = False,
+    gentle: GentleOpt = False,
+    rate: RateOpt = None,
+    no_ping: NoPingOpt = False,
+    no_multicast: NoMcastOpt = False,
     verbose: VerboseOpt = False,
 ) -> None:
     """[bold]Os três juntos:[/] Scout → Sniffer → Squeak (nota, diff, relatório, alerta)."""
@@ -310,11 +339,13 @@ def scan(
     sc = _scope(scope)
     job = ScanJob(
         specs=targets, scope=sc, label=label, save=not no_save, no_evidence=no_evidence,
-        scout_options=_scout_options(ports, timeout, concurrency, no_discovery, udp, no_mac),
+        scout_options=_scout_options(ports, timeout, concurrency, no_discovery, udp, no_mac,
+                                     gentle, rate, no_ping, no_multicast),
         sniffer_options=_sniffer_options(active, no_cve, secrets, disable, max_cves, sc, no_epss, no_backport),
     )
     console.print(f"[dim]Escopo: {sc.source} · {len(job.scout_options.ports)} porta(s) TCP"
-                  f"{' + UDP' if udp else ''} · checks ativos: {'sim' if active else 'não'}[/]")
+                  f"{' + UDP' if udp else ''} · checks ativos: {'sim' if active else 'não'}"
+                  f"{' · modo gentil' if gentle else ''}[/]")
 
     store = HistoryStore()
     with _progress() as prog:
@@ -344,9 +375,10 @@ def watch(
     notify: NotifyOpt = None,
     min_severity: MinSevOpt = Severity.MEDIUM,
     no_evidence: NoEvidenceOpt = False,
+    gentle: GentleOpt = False,
     runs: Annotated[int, typer.Option(help="Para depois de N execuções (0 = infinito).")] = 0,
 ) -> None:
-    """Scan periódico: repete o scan e só alerta quando algo [bold]muda[/]."""
+    """Scan periódico neste terminal. Para rodar em segundo plano, use [cyan]tbm schedule install[/]."""
     try:
         interval = parse_interval(every)
     except ValueError as exc:
@@ -356,7 +388,7 @@ def watch(
     webhook = notify or os.environ.get("TBM_WEBHOOK")
     job = ScanJob(
         specs=targets, scope=sc, label=label, no_evidence=no_evidence,
-        scout_options=_scout_options(ports, 1.0, 400, False, udp),
+        scout_options=_scout_options(ports, 1.0, 400, False, udp, gentle=gentle),
         sniffer_options=_sniffer_options(active, no_cve, None, [], 15, sc),
     )
     store = HistoryStore()
@@ -569,6 +601,143 @@ def dashboard(
                   "e mostra o inventário da sua rede.")
     console.print(f"Dashboard em [bold]http://{host}:{port}[/] (Ctrl+C para sair)")
     uvicorn.run(create_app(HistoryStore()), host=host, port=port, log_level="warning")
+
+
+@app.command()
+def accept(
+    finding_id: Annotated[str, typer.Argument(help="id do achado (coluna 'id', 8+ caracteres) ou fingerprint completo.")],
+    reason: Annotated[str, typer.Option("--reason", "-r", help="Por que o risco é aceito.")],
+    label: LabelOpt = "default",
+    until: Annotated[str | None, typer.Option(help="Validade AAAA-MM-DD. Depois disso o achado volta a contar.")] = None,
+) -> None:
+    """Aceita um risco: o achado continua no relatório, mas sai da nota e dos alertas."""
+    store = HistoryStore()
+    latest = store.latest(label)
+    if latest is None:
+        raise _fail(f"nenhum scan com o rótulo '{label}'")
+    matches = [f for f in latest.findings if f.fingerprint.startswith(finding_id)]
+    if len(matches) != 1:
+        raise _fail(f"{'nenhum' if not matches else len(matches)} achado(s) com id '{finding_id}' "
+                    f"no último scan de '{label}'")
+    if until:
+        try:
+            date.fromisoformat(until)
+        except ValueError as exc:
+            raise _fail("use --until no formato AAAA-MM-DD") from exc
+    f = matches[0]
+    store.accept(f.fingerprint, reason, until=until, label=label, title=f.title, location=f.location)
+    console.print(f"Aceito: [bold]{f.title}[/] ({f.location}){f' até {until}' if until else ''}. "
+                  "Vale a partir do próximo scan.")
+
+
+@app.command()
+def accepted() -> None:
+    """Lista os riscos aceitos."""
+    rows = list(HistoryStore().acceptances().values())
+    if not rows:
+        console.print("[dim]Nenhum risco aceito.[/]")
+        return
+    table = Table(header_style="bold")
+    for col in ("id", "achado", "local", "motivo", "até", "status"):
+        table.add_column(col)
+    for r in rows:
+        status = "[green]ativo[/]" if is_active(r) else "[yellow]expirado[/]"
+        table.add_row(r["fingerprint"][:8], r["title"] or "?", r["location"] or "?", r["reason"],
+                      r["until"] or "—", status)
+    console.print(table)
+
+
+@app.command()
+def unaccept(finding_id: str) -> None:
+    """Desfaz uma aceitação de risco."""
+    n = HistoryStore().unaccept(finding_id)
+    console.print(f"{n} aceitação(ões) removida(s)." if n else "[yellow]nada encontrado[/]")
+
+
+@app.command()
+def letter(
+    host: Annotated[str, typer.Argument(help="IP do equipamento (ex.: o modem da operadora).")],
+    label: LabelOpt = "default",
+    name: Annotated[str | None, typer.Option(help="Seu nome, para a assinatura.")] = None,
+    min_severity: MinSevOpt = Severity.MEDIUM,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Escreve um chamado pronto para o provedor/fabricante com os achados de um equipamento."""
+    latest = HistoryStore().latest(label)
+    if latest is None:
+        raise _fail(f"nenhum scan com o rótulo '{label}'")
+    target = latest.host(host)
+    if target is None:
+        raise _fail(f"{host} não aparece no último scan de '{label}'")
+    text = build_letter(latest, target, name=name, min_severity=min_severity)
+    if output:
+        output.write_text(text, encoding="utf-8")
+        console.print(f"Carta salva em [bold]{output}[/]")
+    else:
+        console.print(text, markup=False, highlight=False)
+
+
+schedule_app = typer.Typer(help="Agenda scans periódicos no agendador do sistema operacional.")
+app.add_typer(schedule_app, name="schedule")
+
+
+@schedule_app.command("install")
+def schedule_install(
+    targets: TargetsArg,
+    every: Annotated[str, typer.Option("--every", "-e", help="Intervalo: 30m, 6h, 1d.")] = "6h",
+    label: LabelOpt = "default",
+    notify: NotifyOpt = None,
+    udp: UdpOpt = False,
+    gentle: GentleOpt = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Só mostra o que seria feito.")] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Não pede confirmação.")] = False,
+) -> None:
+    """Registra um `tbm scan` periódico (Agendador de Tarefas, systemd --user ou cron)."""
+    try:
+        seconds = parse_interval(every)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    Scope.default().resolve(targets)  # o agendamento usa o escopo padrão (redes privadas)
+    extra = [*(["--udp"] if udp else []), *(["--gentle"] if gentle else []),
+             *(["--notify", notify] if notify else [])]
+    plan = schedule.build_plan(sys.platform, targets, label, seconds, extra)
+    console.print(f"[bold]{plan.platform}[/]: {plan.description}")
+    for path, content in plan.files.items():
+        console.print(f"[dim]arquivo {path}:[/]\n{content}", markup=False)
+    for cmd in plan.commands:
+        console.print("$ " + " ".join(cmd), markup=False, highlight=False)
+    for w in plan.warnings:
+        err.print(f"[yellow]atenção:[/] {w}")
+    if plan.manual:
+        console.print(plan.manual, markup=False)
+    if dry_run or not plan.commands:
+        return
+    if not yes and not typer.confirm("Criar o agendamento?"):
+        raise typer.Exit(1)
+    try:
+        schedule.execute(plan)
+    except RuntimeError as exc:
+        raise _fail(str(exc)) from exc
+    console.print("[green]Agendado.[/] Remova com [cyan]tbm schedule remove -l " + label + "[/]")
+
+
+@schedule_app.command("remove")
+def schedule_remove(
+    label: LabelOpt = "default",
+    yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
+) -> None:
+    """Remove o agendamento de um rótulo."""
+    plan = schedule.remove_plan(sys.platform, label)
+    for cmd in plan.commands:
+        console.print("$ " + " ".join(cmd), markup=False, highlight=False)
+    if plan.manual:
+        console.print(plan.manual, markup=False)
+    if plan.commands and (yes or typer.confirm("Remover?")):
+        try:
+            schedule.execute(plan)
+        except RuntimeError as exc:
+            raise _fail(str(exc)) from exc
+        console.print("[green]Removido.[/]")
 
 
 @app.command("update-oui")

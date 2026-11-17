@@ -81,10 +81,7 @@ EXPOSURES: dict[int, Exposure] = {
                    "É a interface de gerência remota de roteadores e já foi explorada em massa "
                    "(Mirai).",
                    "Peça ao provedor para restringir o acesso ou desative o serviço, se possível."),
-    8009: Exposure(Severity.MEDIUM, "Tomcat AJP exposto",
-                   "O conector AJP aberto pode permitir a leitura de arquivos (Ghostcat, "
-                   "CVE-2020-1938).",
-                   "Desative o AJP ou faça bind em localhost com 'secret' configurado."),
+    # 8009 (AJP) não fica aqui: na mesma porta roda o Google Cast. Ver AJPCheck.
 }
 
 
@@ -115,6 +112,55 @@ class ExposedServicesCheck(Check):
                 )
             )
         return findings
+
+
+AJP_CPING = b"\x12\x34\x00\x01\x0a"  # pacote AJP13 CPing (servidor → AB 00 01 09 = CPong)
+AJP_CPONG = b"AB\x00\x01\x09"
+
+
+async def speaks_ajp(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Confirma o protocolo antes de acusar.
+
+    Na primeira versão, qualquer porta 8009 virava "Tomcat AJP exposto". O scan
+    real mostrou o problema: em casa, 8009 é quase sempre Google Cast (Nest,
+    Chromecast), que fala TLS e nunca responde ao CPing.
+    """
+    try:
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+    except (TimeoutError, OSError):
+        return False
+    try:
+        writer.write(AJP_CPING)
+        await writer.drain()
+        return await asyncio.wait_for(reader.readexactly(5), timeout) == AJP_CPONG
+    except (TimeoutError, OSError, asyncio.IncompleteReadError):
+        return False
+    finally:
+        writer.close()
+        with suppress(Exception):
+            await writer.wait_closed()
+
+
+@register
+class AJPCheck(Check):
+    id = "service.ajp"
+    name = "Tomcat AJP exposto (confirmado por CPing)"
+
+    async def run(self, ctx: CheckContext) -> list[Finding]:
+        targets = list(ctx.services(lambda s: s.port in (8009, 8109) and s.tls is None))
+        results = await asyncio.gather(*(speaks_ajp(h.address, s.port) for h, s in targets))
+        return [
+            Finding(
+                check_id=self.id, severity=Severity.MEDIUM, title="Tomcat AJP exposto",
+                host=h.address, port=s.port,
+                description="O conector AJP aberto permite ler arquivos da aplicação e, em "
+                            "alguns casos, executar código (Ghostcat, CVE-2020-1938).",
+                evidence="CPing AJP13 → CPong",
+                remediation="Desative o AJP ou faça bind em localhost com 'secret' configurado.",
+                references=["https://nvd.nist.gov/vuln/detail/CVE-2020-1938"],
+            )
+            for (h, s), ok in zip(targets, results, strict=True) if ok
+        ]
 
 
 @register

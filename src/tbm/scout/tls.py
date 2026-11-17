@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ssl
 from contextlib import suppress
+from typing import cast
 
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
@@ -53,7 +54,10 @@ def parse_certificate(der: bytes) -> TLSInfo:
     cert = x509.load_der_x509_certificate(der)
     sans: list[str] = []
     with suppress(x509.ExtensionNotFound):
-        ext = cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME).value
+        ext = cast(
+            x509.SubjectAlternativeName,
+            cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME).value,
+        )
         sans = [*ext.get_values_for_type(x509.DNSName)]
         sans += [str(ip) for ip in ext.get_values_for_type(x509.IPAddress)]
 

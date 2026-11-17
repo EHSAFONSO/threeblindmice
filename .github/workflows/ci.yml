@@ -4,20 +4,24 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:  # reutilizado pelo release.yml antes de publicar
 
 permissions:
   contents: read
 
 jobs:
   lint:
+    name: lint + types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install ruff
+          cache: pip
+      - run: pip install -e ".[dev]"
       - run: ruff check src tests
+      - run: mypy src
 
   test:
     name: test (${{ matrix.os }}, py${{ matrix.python }})
@@ -28,8 +32,8 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -40,7 +44,7 @@ jobs:
     # Sobe serviços vulneráveis de propósito e roda o tbm contra eles, dentro da rede do Compose.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Serviços em segundo plano e só o scanner em primeiro plano: se um serviço
       # cair, apenas o teste dele falha (com --abort-on-container-exit, um crash
       # derrubava o scanner antes de qualquer assert).
@@ -63,13 +67,13 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install .
       - run: tbm secrets . --output tbm-secrets.sarif --no-fail
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: tbm-secrets.sarif
           category: tbm-secrets

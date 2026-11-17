@@ -6,7 +6,9 @@ dono (chmod 600/700 no POSIX; no Windows o perfil do usuário já é restrito).
 
 from __future__ import annotations
 
+import builtins
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 from tbm.models import ScanResult
@@ -24,6 +26,15 @@ CREATE TABLE IF NOT EXISTS scans (
     data       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_scans_label_time ON scans(label, started_at);
+CREATE TABLE IF NOT EXISTS accepted (
+    fingerprint TEXT PRIMARY KEY,
+    label       TEXT,
+    reason      TEXT NOT NULL,
+    until       TEXT,              -- AAAA-MM-DD; NULL = sem prazo
+    created_at  TEXT NOT NULL,
+    title       TEXT,
+    location    TEXT
+);
 """
 
 # Migrações aditivas: colunas novas entram com ALTER TABLE em bancos antigos.
@@ -100,7 +111,30 @@ class HistoryStore:
         with self._conn() as conn:
             return conn.execute(query, (*params, limit)).fetchall()
 
-    def labels(self) -> list[sqlite3.Row]:
+    # ───────────────────────── riscos aceitos ─────────────────────────
+
+    def accept(self, fingerprint: str, reason: str, *, until: str | None = None, label: str | None = None,
+               title: str | None = None, location: str | None = None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO accepted VALUES (?,?,?,?,?,?,?)",
+                (fingerprint, label, reason, until, datetime.now(UTC).isoformat(), title, location),
+            )
+
+    def unaccept(self, fingerprint: str) -> int:
+        with self._conn() as conn:
+            return conn.execute(
+                "DELETE FROM accepted WHERE fingerprint LIKE ?", (f"{fingerprint}%",)
+            ).rowcount
+
+    def acceptances(self) -> dict[str, sqlite3.Row]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM accepted ORDER BY created_at").fetchall()
+        return {r["fingerprint"]: r for r in rows}
+
+    # `builtins.list`: dentro da classe, "list" já é o método acima, e a anotação
+    # `-> list[...]` apontaria para ele (o mypy acusou).
+    def labels(self) -> builtins.list[sqlite3.Row]:
         """Último scan de cada rótulo (para a página inicial do dashboard)."""
         with self._conn() as conn:
             return conn.execute(

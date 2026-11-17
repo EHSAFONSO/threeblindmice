@@ -13,7 +13,8 @@
     <div><span class="label">Dispositivos</span><br>
       {% for h in d.new_hosts %}+ {{ h.display }}<br>{% endfor %}
       {% for h in d.gone_hosts %}− {{ h.display }}<br>{% endfor %}
-      {% if not d.new_hosts and not d.gone_hosts %}—{% endif %}</div>
+      {% for h, old_ip, new_ip in d.ip_changes %}↔ {{ h.device_name or h.mac or new_ip }}: {{ old_ip }} → {{ new_ip }}<br>{% endfor %}
+      {% if not d.new_hosts and not d.gone_hosts and not d.ip_changes %}—{% endif %}</div>
     <div><span class="label">Portas</span><br>
       {% for p in d.opened_ports %}+ <code>{{ p | port }}</code><br>{% endfor %}
       {% for p in d.closed_ports %}− <code>{{ p | port }}</code><br>{% endfor %}

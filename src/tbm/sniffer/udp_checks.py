@@ -6,17 +6,9 @@ O contexto muda a severidade: um resolver DNS recursivo na sua LAN é normal
 
 from __future__ import annotations
 
-import ipaddress
-
 from tbm.models import Finding, Severity
+from tbm.scope import is_public
 from tbm.sniffer.base import Check, CheckContext, register
-
-
-def is_public(address: str) -> bool:
-    try:
-        return ipaddress.ip_address(address).is_global
-    except ValueError:
-        return False
 
 
 @register

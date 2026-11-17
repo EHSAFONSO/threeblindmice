@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "threeblindmice"
-version = "0.2.0"
+version = "0.3.0"
 description = "Toolkit defensivo de avaliação de segurança: Scout (recon), Sniffer (análise) e Squeak (relatórios)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,15 @@ dependencies = [
 
 [project.optional-dependencies]
 web = ["fastapi>=0.110", "uvicorn>=0.29"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5", "threeblindmice[web]"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "types-PyYAML",
+    "threeblindmice[web]",
+]
 
 [project.scripts]
 tbm = "tbm.cli:app"
@@ -37,6 +45,16 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = ["integration: precisa do ambiente Docker Compose (TBM_INTEGRATION=1)"]
 filterwarnings = ["ignore:.*httpx2.*"]  # aviso interno do starlette.testclient
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["paramiko", "paramiko.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 120

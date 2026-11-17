@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from tbm.models import Host, ScanResult, Service, Severity
+from tbm.models import Finding, Host, ScanResult, Service, Severity
 from tbm.scout.tls import parse_certificate
 from tbm.sniffer import Sniffer, SnifferOptions
 from tbm.sniffer.cve import cpe_candidates, parse_nvd_response
@@ -33,11 +33,20 @@ def test_http_missing_headers_and_disclosure():
         f for f in findings if f.check_id == "http.headers").evidence
 
 
-def test_http_cleartext_login_is_high():
-    r = _resp("http://10.0.0.2/", text='<form><input type="password" name="p"></form>')
-    findings = analyze_response("10.0.0.2", 80, "http://10.0.0.2/", r)
-    assert any(f.check_id == "http.cleartext-login" and f.severity is Severity.HIGH
-               for f in findings)
+def test_http_cleartext_login_severity_depends_on_network():
+    page = '<form><input type="password" name="p"></form>'
+
+    def severity(ip: str) -> Severity:
+        from tbm.sniffer.context import apply_context
+
+        r = _resp(f"http://{ip}/", text=page)
+        findings = analyze_response(ip, 80, f"http://{ip}/", r)
+        apply_context(findings)  # o engine aplica isto depois de todos os checks
+        [f] = [f for f in findings if f.check_id == "http.cleartext-login"]
+        return f.severity
+
+    assert severity("8.8.8.8") is Severity.HIGH      # internet: qualquer um no caminho lê a senha
+    assert severity("192.168.0.1") is Severity.MEDIUM  # LAN: precisa já estar na rede
 
 
 def test_http_hardened_response_is_clean():
@@ -125,6 +134,37 @@ def test_parse_nvd_response():
     }
     [rec] = parse_nvd_response(payload)
     assert rec.id == "CVE-2023-38408" and rec.score == 9.8 and rec.kev
+
+
+def test_terrapin_cve_merged_into_specific_finding():
+    from tbm.sniffer.engine import merge_cve_duplicates
+
+    specific = Finding(check_id="ssh.algorithms", key="terrapin", severity=Severity.MEDIUM,
+                       host="10.0.0.5", port=22, title="SSH vulnerável ao Terrapin (CVE-2023-48795)",
+                       references=["https://terrapin-attack.com"])
+    generic = Finding(check_id="cve.nvd", key="CVE-2023-48795", severity=Severity.MEDIUM,
+                      host="10.0.0.5", port=22, title="CVE-2023-48795 em Dropbear", epss=0.94,
+                      cvss=5.9, references=["https://nvd.nist.gov/vuln/detail/CVE-2023-48795"])
+    other_cve = Finding(check_id="cve.nvd", key="CVE-2021-36369", severity=Severity.HIGH,
+                        host="10.0.0.5", port=22, title="CVE-2021-36369 em Dropbear")
+    other_host = generic.model_copy(update={"host": "10.0.0.6"})
+
+    result = merge_cve_duplicates([specific, generic, other_cve, other_host])
+    assert generic not in result and other_cve in result and other_host in result
+    merged = next(f for f in result if f.check_id == "ssh.algorithms")
+    assert merged.epss == 0.94 and merged.cvss == 5.9 and merged.title.endswith("EPSS 94%")
+    assert "https://nvd.nist.gov/vuln/detail/CVE-2023-48795" in merged.references
+
+
+def test_merge_inherits_kev_severity():
+    from tbm.sniffer.engine import merge_cve_duplicates
+
+    specific = Finding(check_id="x", title="Falha (CVE-2024-0001)", severity=Severity.MEDIUM,
+                       host="h", port=1)
+    generic = Finding(check_id="cve.nvd", key="CVE-2024-0001", title="t", severity=Severity.CRITICAL,
+                      host="h", port=1, kev=True)
+    [f] = merge_cve_duplicates([specific, generic])
+    assert f.kev and f.severity is Severity.CRITICAL
 
 
 async def test_sniffer_engine_offline():

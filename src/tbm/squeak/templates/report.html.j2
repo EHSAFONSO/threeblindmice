@@ -119,6 +119,10 @@
       <div><span class="label">Portas fechadas</span><br>
         {% for p in diff.closed_ports %}<code>{{ p | port }}</code> {% else %}—{% endfor %}</div>
     </div>
+    {% if diff.ip_changes %}
+    <p class="label" style="margin-top:16px">Mudaram de IP (mesmo dispositivo)</p>
+    <ul>{% for h, old_ip, new_ip in diff.ip_changes %}<li>{{ h.device_name or h.mac }}: <code>{{ old_ip }}</code> → <code>{{ new_ip }}</code></li>{% endfor %}</ul>
+    {% endif %}
     {% if diff.mac_changes %}
     <p class="label" style="margin-top:16px">⚠ MAC mudou para o mesmo IP</p>
     <ul>{% for ip, old, new in diff.mac_changes %}<li><code>{{ ip }}</code>: {{ old }} → {{ new }} <span class="muted">(troca de aparelho, DHCP ou ARP spoofing)</span></li>{% endfor %}</ul>
@@ -138,10 +142,11 @@
     <details{% if f.severity.rank >= 3 %} open{% endif %}>
       <summary>
         <span class="sev sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
-        <span class="title">{{ f.title }}{% if f.fingerprint in new_fps %} <span class="plus">· novo</span>{% endif %}</span>
+        <span class="title">{{ f.title }}{% if f.fingerprint in new_fps %} <span class="plus">· novo</span>{% endif %}{% if f.accepted %} <span class="muted">· risco aceito</span>{% endif %}</span>
         <span class="loc">{{ f.location }}</span>
       </summary>
       <div class="finding-body">
+        {% if f.acceptance %}<p><span class="label">Aceitação</span> {{ f.acceptance }}</p>{% endif %}
         {% if f.description %}<p>{{ f.description }}</p>{% endif %}
         {% if f.evidence %}<span class="label">Evidência</span><pre>{{ f.evidence }}</pre>{% endif %}
         {% if f.remediation %}<span class="label">Como corrigir</span><p>{{ f.remediation }}</p>{% endif %}
@@ -168,7 +173,7 @@
       {% for h in r.hosts %}
         {% for s in h.services %}
         <tr>
-          <td>{% if loop.first %}<b>{{ h.address }}</b>{% if h.hostname %}<br><span class="muted">{{ h.hostname }}</span>{% endif %}{% if h.mac %}<br><span class="muted"><code>{{ h.mac }}</code>{% if h.vendor %} · {{ h.vendor }}{% endif %}</span>{% endif %}{% endif %}</td>
+          <td>{% if loop.first %}<b>{{ h.address }}</b>{% if h.device_name or h.device_type %}<br>{{ h.device_name or "" }}{% if h.device_type %} <span class="muted">({{ h.device_type }})</span>{% endif %}{% endif %}{% if h.hostname %}<br><span class="muted">{{ h.hostname }}</span>{% endif %}{% if h.mac %}<br><span class="muted"><code>{{ h.mac }}</code>{% if h.vendor %} · {{ h.vendor }}{% endif %}</span>{% endif %}{% endif %}</td>
           <td><code>{{ s.port }}/{{ s.transport }}</code></td>
           <td>{{ s.name or "?" }}{% if s.extra.smb_dialect %}<br><span class="muted">SMB {{ s.extra.smb_dialect }}</span>{% endif %}</td>
           <td>{{ s.product or "" }} {{ s.version or "" }}</td>

@@ -43,6 +43,14 @@ class ScopeError(ValueError):
     """Alvo inválido ou fora do escopo autorizado."""
 
 
+def is_public(address: str) -> bool:
+    """True para IPs roteáveis na internet. Os checks usam isso para calibrar a severidade."""
+    try:
+        return ipaddress.ip_address(address).is_global
+    except ValueError:
+        return False
+
+
 @dataclass(frozen=True)
 class Target:
     address: str

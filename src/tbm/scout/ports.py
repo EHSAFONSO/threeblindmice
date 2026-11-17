@@ -27,7 +27,7 @@ SERVICE_NAMES: dict[int, str] = {
     4443: "https", 5000: "http", 5001: "https", 5060: "sip", 5357: "wsdapi",
     5432: "postgresql", 5555: "adb", 5601: "kibana", 5672: "amqp", 5900: "vnc",
     5984: "couchdb", 5985: "winrm", 5986: "winrm-tls", 6379: "redis", 6443: "kubernetes",
-    7547: "tr069", 8000: "http", 8008: "http", 8009: "ajp", 8080: "http", 8081: "http",
+    7547: "tr069", 8000: "http", 8008: "http", 8009: "ajp/googlecast", 8080: "http", 8081: "http",
     8088: "http", 8123: "http", 8291: "mikrotik-winbox", 8443: "https", 8883: "mqtt-tls",
     8888: "http", 9000: "http", 9090: "http", 9091: "http", 9100: "jetdirect",
     9200: "elasticsearch", 9443: "https", 10000: "http", 11211: "memcached",

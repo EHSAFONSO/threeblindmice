@@ -1,11 +1,20 @@
-"""Alertas por webhook (Discord, Slack ou JSON genérico).
+"""Alertas: Discord, Slack, Telegram, ntfy ou webhook JSON genérico.
 
 Só dispara quando há algo *novo* de severidade ≥ mínima. Alerta que toca
 toda vez acaba ignorado.
+
+Formatos de destino aceitos em --notify / TBM_WEBHOOK:
+- https://discord.com/api/webhooks/...      → Discord
+- https://hooks.slack.com/services/...      → Slack
+- tg://<token-do-bot>/<chat_id>             → Telegram (Bot API)
+- ntfy://<tópico>  ou  https://ntfy.sh/<tópico>  → ntfy (push grátis no celular)
+- qualquer outra URL https                  → POST com JSON completo
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -21,7 +30,7 @@ def port_label(port: PortKey) -> str:
 
 
 def relevant(diff: ScanDiff, min_severity: Severity) -> list[Finding]:
-    return [f for f in diff.new_findings if f.severity.rank >= min_severity.rank]
+    return [f for f in diff.new_findings if f.severity.rank >= min_severity.rank and not f.accepted]
 
 
 def build_message(result: ScanResult, diff: ScanDiff, items: list[Finding]) -> str:
@@ -46,14 +55,49 @@ def build_message(result: ScanResult, diff: ScanDiff, items: list[Finding]) -> s
     return "\n".join(lines)
 
 
-def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> dict:
+@dataclass
+class Delivery:
+    """Uma requisição HTTP pronta. Separada do envio para dar para testar sem rede."""
+
+    url: str
+    json: dict[str, Any] | None = None
+    content: bytes | None = None
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+def _highest(items: list[Finding]) -> Severity | None:
+    return max((f.severity for f in items), key=lambda s: s.rank, default=None)
+
+
+def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> Delivery:
     text = build_message(result, diff, items)
-    host = urlparse(url).hostname or ""
+    parsed = urlparse(target)
+    host = parsed.hostname or ""
+
+    if parsed.scheme == "tg":
+        # tg://<token>/<chat_id>: o token tem ':' e por isso vai inteiro no "netloc"
+        token, chat_id = parsed.netloc, parsed.path.strip("/")
+        if not token or not chat_id:
+            raise ValueError("formato do Telegram: tg://<token-do-bot>/<chat_id>")
+        return Delivery(f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": True})
+
+    if parsed.scheme == "ntfy" or host == "ntfy.sh":
+        topic = (parsed.netloc + parsed.path).strip("/") if parsed.scheme == "ntfy" else parsed.path.strip("/")
+        base = "https://ntfy.sh" if parsed.scheme == "ntfy" else f"{parsed.scheme}://{parsed.netloc}"
+        top = _highest(items)
+        priority = {Severity.CRITICAL: "urgent", Severity.HIGH: "high"}.get(top, "default") if top else "low"
+        return Delivery(f"{base}/{topic}", content=text.encode(), headers={
+            "Title": f"threeblindmice: {result.label} ({result.grade})",
+            "Priority": priority,
+            "Tags": "mouse,shield",
+        })
+
     if host.endswith("discord.com") or host.endswith("discordapp.com"):
-        return {"content": text[:1990], "username": "threeblindmice"}
+        return Delivery(target, json={"content": text[:1990], "username": "threeblindmice"})
     if host.endswith("slack.com"):
-        return {"text": text}
-    return {
+        return Delivery(target, json={"text": text})
+    return Delivery(target, json={
         "text": text,
         "scan_id": result.scan_id,
         "label": result.label,
@@ -63,17 +107,25 @@ def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Find
         "new_hosts": [h.model_dump(mode="json", exclude={"services"}) for h in diff.new_hosts],
         "opened_ports": [port_label(p) for p in diff.opened_ports],
         "mac_changes": [{"ip": ip, "old": o, "new": n} for ip, o, n in diff.mac_changes],
-    }
+    })
+
+
+def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> dict:
+    """Compatibilidade: o corpo JSON dos destinos baseados em JSON."""
+    return build_delivery(url, result, diff, items).json or {}
 
 
 async def send_webhook(
-    url: str, result: ScanResult, diff: ScanDiff, min_severity: Severity = Severity.MEDIUM
+    url: str, result: ScanResult, diff: ScanDiff, min_severity: Severity = Severity.MEDIUM,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> bool:
     """Retorna True se enviou, False se não havia nada relevante."""
     items = relevant(diff, min_severity)
     if not items and not diff.new_hosts and not diff.opened_ports and not diff.mac_changes:
         return False
-    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT}) as client:
-        resp = await client.post(url, json=build_payload(url, result, diff, items))
+    d = build_delivery(url, result, diff, items)
+    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT},
+                                 transport=transport) as client:
+        resp = await client.post(d.url, json=d.json, content=d.content, headers=d.headers)
         resp.raise_for_status()
     return True

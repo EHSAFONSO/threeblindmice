@@ -69,6 +69,7 @@ HTTP_SERVER_SIGNATURES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
 )
 
 _SERVER_HEADER = re.compile(r"^server:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+_TITLE = re.compile(r"<title[^>]*>([^<]{1,200})</title>", re.IGNORECASE)
 
 
 @dataclass
@@ -106,6 +107,8 @@ def identify(port: int, data: bytes, tls: bool) -> Identification:
 
     if text.startswith("HTTP/"):
         ident.name = "https" if tls else "http"
+        if m := _TITLE.search(text):
+            ident.extra["title"] = " ".join(m.group(1).split())[:120]
         if m := _SERVER_HEADER.search(text):
             server = m.group(1)
             ident.extra["server"] = server
@@ -186,12 +189,23 @@ async def _exchange(
             await writer.wait_closed()
 
 
+_TEXT_BYTES = frozenset(range(0x20, 0x7F)) | {0x09, 0x0A, 0x0D}
+
+
 def _clean_banner(data: bytes, limit: int = 400) -> str | None:
+    """Banner legível. Só ASCII imprimível passa: bytes Latin-1 como '¼æ' são
+    "imprimíveis" para o Python, mas são lixo binário (ex.: o KEXINIT do SSH)."""
     if not data:
         return None
-    text = data[:limit].decode("latin-1", errors="replace")
-    text = "".join(ch if ch.isprintable() or ch in "\r\n\t" else "." for ch in text)
+    text = "".join(chr(b) if b in _TEXT_BYTES else "." for b in data[:limit])
     return text.strip() or None
+
+
+def _protocol_banner(name: str | None, data: bytes) -> bytes:
+    """Protocolos que mandam binário logo depois da linha de texto: guardamos só a linha."""
+    if name == "ssh":
+        return data.split(b"\n", 1)[0]
+    return data
 
 
 def _needs_tls_retry(data: bytes) -> bool:
@@ -237,7 +251,7 @@ async def grab_service(
         name=ident.name,
         product=ident.product,
         version=ident.version,
-        banner=_clean_banner(data),
+        banner=_clean_banner(_protocol_banner(ident.name, data)),
         tls=tls,
         extra=ident.extra,
     )

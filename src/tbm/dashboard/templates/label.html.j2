@@ -1,5 +1,5 @@
 <section>
-  <h2>Evolução da nota · {{ label }}</h2>
+  <h2>Evolução da nota · {{ label }} <a href="/inventory/{{ label | urlencode }}" style="font-size:13px;font-weight:400">ver dispositivos →</a></h2>
   {{ chart | safe }}
 </section>
 <section>
@@ -17,7 +17,7 @@
             <span class="m">{{ r.medium or 0 }}</span> / <span class="l">{{ r.low or 0 }}</span></td>
         <td>
           <a href="/scan/{{ r.scan_id }}" target="_blank">relatório</a> ·
-          <button class="link" hx-get="/partials/diff/{{ r.scan_id }}" hx-target="#diff-{{ r.scan_id }}">o que mudou?</button>
+          <button class="link" data-get="/partials/diff/{{ r.scan_id }}" data-target="#diff-{{ r.scan_id }}">o que mudou?</button>
         </td>
       </tr>
       <tr><td colspan="5" id="diff-{{ r.scan_id }}" style="border:0;padding:0"></td></tr>
