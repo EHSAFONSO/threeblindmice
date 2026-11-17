@@ -45,7 +45,7 @@ jobs:
       # cair, apenas o teste dele falha (com --abort-on-container-exit, um crash
       # derrubava o scanner antes de qualquer assert).
       - name: Sobe o laboratório
-        run: docker compose -f integration/compose.yml up -d --build redis ftp web ssh snmp
+        run: docker compose -f integration/compose.yml up -d --build --wait --wait-timeout 120 redis ftp web ssh snmp
       - name: Testes de integração
         run: docker compose -f integration/compose.yml run --rm --build scanner
       - name: Logs dos serviços (em caso de falha)

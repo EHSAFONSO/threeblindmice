@@ -171,7 +171,7 @@ Os testes sobem servidores falsos em `127.0.0.1` (SSH, FTP, DNS), simulam NVD, E
 Integração com serviços reais (Redis sem senha, vsftpd anônimo, nginx com `.git`, OpenSSH com CBC, SNMP `public`), numa rede Docker isolada sem acesso à internet:
 
 ```bash
-docker compose -f integration/compose.yml up -d --build redis ftp web ssh snmp
+docker compose -f integration/compose.yml up -d --build --wait redis ftp web ssh snmp
 docker compose -f integration/compose.yml run --rm --build scanner
 docker compose -f integration/compose.yml down -v
 ```

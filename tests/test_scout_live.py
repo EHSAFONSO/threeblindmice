@@ -69,3 +69,25 @@ async def fake_ftp():
 
 async def test_ftp_anonymous_detection(fake_ftp):
     assert await ftp_allows_anonymous("127.0.0.1", fake_ftp, timeout=2) is True
+
+
+async def test_ftp_check_retries_after_silent_connection(monkeypatch):
+    """1ª conexão: servidor calado (timeout). 2ª: responde normal. O check deve achar."""
+    import tbm.sniffer.service_checks as sc
+    from tbm.models import Host, ScanResult, Service
+    from tbm.sniffer.base import CheckContext, SnifferOptions
+
+    calls = 0
+
+    async def flaky(host, port, timeout=5.0):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError
+        return True
+
+    monkeypatch.setattr(sc, "ftp_allows_anonymous", flaky)
+    scan = ScanResult(hosts=[Host(address="10.0.0.2", services=[Service(port=21, name="ftp")])])
+    ctx = CheckContext(scan=scan, http=None, options=SnifferOptions(active=True))  # type: ignore[arg-type]
+    [finding] = await sc.AnonymousFTPCheck().run(ctx)
+    assert finding.title == "FTP aceita login anônimo" and calls == 2

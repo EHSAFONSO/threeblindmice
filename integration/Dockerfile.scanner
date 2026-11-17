@@ -4,5 +4,5 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY tests ./tests
 RUN pip install --no-cache-dir -e ".[dev]"
-# Espera os serviços subirem antes de testar
-CMD ["sh", "-c", "sleep 8 && pytest -m integration -v tests/integration"]
+# A prontidão dos serviços é garantida pelos healthchecks do compose.yml.
+CMD ["pytest", "-m", "integration", "-v", "tests/integration"]

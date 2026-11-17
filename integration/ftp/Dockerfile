@@ -18,6 +18,10 @@ RUN apk add --no-cache vsftpd \
        "pasv_min_port=21100" \
        "pasv_max_port=21110" \
        "secure_chroot_dir=/var/run/vsftpd/empty" \
+       "reverse_lookup_enable=NO" \
+       "log_ftp_protocol=YES" \
+       "syslog_enable=NO" \
+       "vsftpd_log_file=/dev/stdout" \
        > /etc/vsftpd/vsftpd.conf
 EXPOSE 21
 CMD ["vsftpd", "/etc/vsftpd/vsftpd.conf"]

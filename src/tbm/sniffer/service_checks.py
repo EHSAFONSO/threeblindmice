@@ -197,10 +197,15 @@ class AnonymousFTPCheck(Check):
         targets = list(ctx.services(lambda s: s.name == "ftp" and s.tls is None))
 
         async def one(host, svc) -> Finding | None:
-            try:
-                allowed = await ftp_allows_anonymous(host.address, svc.port)
-            except (TimeoutError, OSError):
-                return None
+            # Servidores FTP às vezes demoram a mandar o 220 (fork, DNS reverso, carga).
+            # Uma segunda tentativa evita falso negativo por um timeout isolado.
+            allowed = False
+            for _ in range(2):
+                try:
+                    allowed = await ftp_allows_anonymous(host.address, svc.port)
+                    break
+                except (TimeoutError, OSError, asyncio.IncompleteReadError):
+                    continue
             if not allowed:
                 return None
             return Finding(

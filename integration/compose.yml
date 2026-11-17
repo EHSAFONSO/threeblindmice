@@ -1,32 +1,55 @@
 # Laboratório de integração: serviços vulneráveis DE PROPÓSITO, isolados numa
 # rede interna do Compose (nenhuma porta é publicada no host).
 #
-#   docker compose -f integration/compose.yml up -d --build redis ftp web ssh snmp
+#   docker compose -f integration/compose.yml up -d --build --wait redis ftp web ssh snmp
 #   docker compose -f integration/compose.yml run --rm --build scanner
 #   docker compose -f integration/compose.yml down -v
 #
 # O container "scanner" roda o pytest -m integration contra os outros pelo nome.
+# Cada serviço tem um healthcheck que verifica a resposta real do protocolo:
+# o scanner só começa quando todos estão de fato prontos (sem `sleep` fixo).
+
+x-health: &health
+  interval: 2s
+  timeout: 3s
+  retries: 20
+  start_period: 2s
 
 services:
   redis:
     image: redis:7.2-alpine
     command: ["redis-server", "--protected-mode", "no"]   # sem senha: alvo do check service.banner
+    healthcheck:
+      <<: *health
+      test: ["CMD", "redis-cli", "ping"]
     networks: [lab]
 
   ftp:
     build: ./ftp            # vsftpd com login anônimo
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "echo QUIT | nc -w 2 127.0.0.1 21 | grep -q '^220'"]
     networks: [lab]
 
   web:
     build: ./web            # nginx com autoindex, versão exposta e .git esquecido
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
     networks: [lab]
 
   ssh:
     build: ./ssh            # OpenSSH com senha e cifra CBC
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "echo | nc -w 2 127.0.0.1 22 | grep -q '^SSH-2.0'"]
     networks: [lab]
 
   snmp:
     build: ./snmp           # net-snmp com community "public"
+    healthcheck:
+      <<: *health
+      test: ["CMD-SHELL", "pgrep snmpd"]
     networks: [lab]
 
   scanner:
@@ -35,7 +58,12 @@ services:
       dockerfile: integration/Dockerfile.scanner
     environment:
       TBM_INTEGRATION: "1"
-    depends_on: [redis, ftp, web, ssh, snmp]
+    depends_on:
+      redis: {condition: service_healthy}
+      ftp: {condition: service_healthy}
+      web: {condition: service_healthy}
+      ssh: {condition: service_healthy}
+      snmp: {condition: service_healthy}
     networks: [lab]
 
 networks:
