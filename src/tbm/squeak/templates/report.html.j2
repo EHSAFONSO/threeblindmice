@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>threeblindmice · {{ r.label }}</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5f6b7a; --line: #e3e7ec;
+    --critical: #b4121b; --high: #d9480f; --medium: #c48a00; --low: #2f6fbf; --info: #6b7785;
+    --good: #2b8a3e; --accent: #5b3fd0; --code: #f0f2f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1216; --panel: #171b21; --text: #e6e9ee; --muted: #93a0b0; --line: #2a313b;
+      --critical: #ff5c66; --high: #ff8a4c; --medium: #f2c14e; --low: #6ea8ff; --info: #93a0b0;
+      --good: #51cf66; --accent: #9b87ff; --code: #0b0e12;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+  header { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; margin-bottom: 28px; }
+  header h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  .score { margin-left: auto; text-align: center; }
+  .score .grade { font-size: 46px; font-weight: 800; line-height: 1; }
+  .score .num { color: var(--muted); font-size: 13px; }
+  .grade-A, .grade-B { color: var(--good); } .grade-C { color: var(--medium); }
+  .grade-D { color: var(--high); } .grade-F { color: var(--critical); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+            padding: 20px 22px; margin-bottom: 20px; }
+  h2 { margin: 0 0 14px; font-size: 17px; }
+  .counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+  .count { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .count b { display: block; font-size: 26px; }
+  .count span { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .sev { display: inline-block; min-width: 72px; text-align: center; padding: 2px 8px; border-radius: 999px;
+         font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #fff; }
+  .sev-critical { background: var(--critical); } .sev-high { background: var(--high); }
+  .sev-medium { background: var(--medium); color: #1b1f24; } .sev-low { background: var(--low); }
+  .sev-info { background: var(--info); }
+  .bar-critical { color: var(--critical); } .bar-high { color: var(--high); }
+  .bar-medium { color: var(--medium); } .bar-low { color: var(--low); } .bar-info { color: var(--info); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .table-wrap { overflow-x: auto; }
+  code, pre { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+        white-space: pre-wrap; word-break: break-word; margin: 8px 0; }
+  details { border-bottom: 1px solid var(--line); padding: 10px 0; }
+  details:last-child { border-bottom: 0; }
+  summary { cursor: pointer; display: flex; gap: 12px; align-items: center; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary .title { flex: 1; font-weight: 600; }
+  summary .loc { color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  .finding-body { padding: 6px 0 4px 86px; }
+  .finding-body p { margin: 6px 0; white-space: pre-line; }
+  .label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .diff-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .diff-grid div { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .plus { color: var(--critical); } .minus { color: var(--good); }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+  footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 32px; }
+  @media (max-width: 640px) { .finding-body { padding-left: 0; } summary { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>🐭🐭🐭 threeblindmice</h1>
+      <div class="meta">
+        Scan <code>{{ r.scan_id }}</code> · rótulo <b>{{ r.label }}</b> ·
+        {{ r.started_at.strftime("%d/%m/%Y %H:%M") }} UTC
+        {% if r.finished_at %} · duração {{ ((r.finished_at - r.started_at).total_seconds()) | round(1) }}s{% endif %}
+      </div>
+      <div class="meta">Alvos: {{ r.targets | join(", ") }}</div>
+      <div class="meta">Escopo: {{ r.scope }}</div>
+    </div>
+    {% if r.grade %}
+    <div class="score">
+      <div class="grade grade-{{ r.grade }}">{{ r.grade }}</div>
+      <div class="num">{{ r.score }}/100
+        {% if diff and diff.score_delta %}({{ "%+d" | format(diff.score_delta) }}){% endif %}</div>
+    </div>
+    {% endif %}
+  </header>
+
+  <section>
+    <h2>Resumo</h2>
+    <div class="counts">
+      <div class="count"><b>{{ r.hosts | length }}</b><span>hosts</span></div>
+      <div class="count"><b>{{ r.open_ports | length }}</b><span>portas abertas</span></div>
+      {% for sev in severities %}
+      <div class="count"><b class="bar-{{ sev.value }}">{{ counts[sev] }}</b><span>{{ sev.value }}</span></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if diff and diff.previous_id %}
+  <section>
+    <h2>O que mudou desde <code>{{ diff.previous_id }}</code></h2>
+    {% if not diff.has_changes %}
+      <p class="muted">Nada mudou. Mesmos hosts, mesmas portas e mesmos achados.</p>
+    {% else %}
+    <div class="diff-grid">
+      <div><span class="label">Achados novos</span><br><b class="plus">+{{ diff.new_findings | length }}</b></div>
+      <div><span class="label">Resolvidos</span><br><b class="minus">−{{ diff.resolved_findings | length }}</b></div>
+      <div><span class="label">Hosts novos</span><br>{{ diff.new_hosts | join(", ") or "—" }}</div>
+      <div><span class="label">Hosts sumiram</span><br>{{ diff.gone_hosts | join(", ") or "—" }}</div>
+      <div><span class="label">Portas abertas</span><br>
+        {% for h, p in diff.opened_ports %}<code>{{ h }}:{{ p }}</code> {% else %}—{% endfor %}</div>
+      <div><span class="label">Portas fechadas</span><br>
+        {% for h, p in diff.closed_ports %}<code>{{ h }}:{{ p }}</code> {% else %}—{% endfor %}</div>
+    </div>
+    {% if diff.resolved_findings %}
+    <p class="label" style="margin-top:16px">Resolvidos</p>
+    <ul>{% for f in diff.resolved_findings %}<li><span class="sev sev-{{ f.severity.value }}">{{ f.severity.value }}</span> {{ f.title }} <span class="muted">({{ f.location }})</span></li>{% endfor %}</ul>
+    {% endif %}
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section>
+    <h2>Achados ({{ r.findings | length }})</h2>
+    {% set new_fps = (diff.new_findings | map(attribute="fingerprint") | list) if diff and diff.previous_id else [] %}
+    {% for f in r.findings %}
+    <details{% if f.severity.rank >= 3 %} open{% endif %}>
+      <summary>
+        <span class="sev sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
+        <span class="title">{{ f.title }}{% if f.fingerprint in new_fps %} <span class="plus">· novo</span>{% endif %}</span>
+        <span class="loc">{{ f.location }}</span>
+      </summary>
+      <div class="finding-body">
+        {% if f.description %}<p>{{ f.description }}</p>{% endif %}
+        {% if f.evidence %}<span class="label">Evidência</span><pre>{{ f.evidence }}</pre>{% endif %}
+        {% if f.remediation %}<span class="label">Como corrigir</span><p>{{ f.remediation }}</p>{% endif %}
+        {% if f.cvss is not none %}<p class="muted">CVSS {{ f.cvss }}</p>{% endif %}
+        {% for ref in f.references %}<a href="{{ ref }}" target="_blank" rel="noopener">{{ ref }}</a><br>{% endfor %}
+        <p class="muted"><code>{{ f.check_id }}</code> · <code>{{ f.fingerprint }}</code></p>
+      </div>
+    </details>
+    {% else %}
+    <p class="muted">Nenhum achado. 🎉</p>
+    {% endfor %}
+  </section>
+
+  <section>
+    <h2>Inventário</h2>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Host</th><th>Porta</th><th>Serviço</th><th>Produto</th><th>TLS</th></tr></thead>
+      <tbody>
+      {% for h in r.hosts %}
+        {% for s in h.services %}
+        <tr>
+          <td>{% if loop.first %}<b>{{ h.address }}</b>{% if h.hostname %}<br><span class="muted">{{ h.hostname }}</span>{% endif %}{% endif %}</td>
+          <td><code>{{ s.port }}/{{ s.transport }}</code></td>
+          <td>{{ s.name or "?" }}</td>
+          <td>{{ s.product or "" }} {{ s.version or "" }}</td>
+          <td>{% if s.tls %}{{ s.tls.protocol or "" }}{% if s.tls.not_after %}<br><span class="muted">até {{ s.tls.not_after.strftime("%Y-%m-%d") }}</span>{% endif %}{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td><b>{{ h.address }}</b>{% if h.hostname %}<br><span class="muted">{{ h.hostname }}</span>{% endif %}</td><td colspan="4" class="muted">ativo, sem portas abertas nas portas testadas</td></tr>
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  {% if r.errors %}
+  <section>
+    <h2>Erros durante o scan</h2>
+    <pre>{{ r.errors | join("\n") }}</pre>
+  </section>
+  {% endif %}
+
+  <footer>Gerado por threeblindmice {{ version }} · use somente em sistemas que você tem autorização para testar.</footer>
+</main>
+</body>
+</html>
