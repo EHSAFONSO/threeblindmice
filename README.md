@@ -168,7 +168,7 @@ pytest -q                     # unitários: sem rede externa, rodam em segundos
 
 Os testes sobem servidores falsos em `127.0.0.1` (SSH, FTP, DNS), simulam NVD, EPSS e Ubuntu com o `httpx.MockTransport` e geram certificados na hora.
 
-Integração com serviços reais (Redis sem senha, vsftpd anônimo, nginx com `.git`, OpenSSH com CBC, SNMP `public`), numa rede Docker isolada sem acesso à internet:
+Integração com serviços reais (Redis sem senha, FTP anônimo (pyftpdlib), nginx com `.git`, OpenSSH com CBC, SNMP `public`), numa rede Docker isolada sem acesso à internet:
 
 ```bash
 docker compose -f integration/compose.yml up -d --build --wait redis ftp web ssh snmp
