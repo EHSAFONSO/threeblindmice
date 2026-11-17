@@ -1,0 +1,115 @@
+{% extends "base.html.j2" %}
+{% block title %}Achados · {{ label }}{% endblock %}
+{% block content %}
+<style>
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0 4px; }
+  .sev { display: inline-block; min-width: 74px; text-align: center; padding: 2px 8px; border-radius: 999px;
+         font-size: 11px; font-weight: 700; text-transform: uppercase; color: #fff; }
+  .sev-critical { background: var(--critical); } .sev-high { background: var(--high); }
+  .sev-medium { background: var(--medium); color: #1b1f24; } .sev-low { background: var(--low); }
+  .sev-info { background: var(--muted); }
+  details.finding { border-bottom: 1px solid var(--line); padding: 10px 0; }
+  details.finding summary { cursor: pointer; display: flex; gap: 10px; align-items: center; list-style: none; }
+  details.finding summary::-webkit-details-marker { display: none; }
+  details.finding summary .t { flex: 1; font-weight: 600; }
+  details.finding.accepted summary .t { color: var(--muted); font-weight: 400; }
+  .body { padding: 8px 0 4px 84px; } .body p { margin: 6px 0; white-space: pre-line; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+        white-space: pre-wrap; word-break: break-word; font-size: 12.5px; }
+  .accept-form { display: none; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  .accept-form.open { display: flex; }
+  @media (max-width: 640px) { .body { padding-left: 0; } }
+</style>
+
+<section style="margin-top:18px">
+  <h2>Achados · {{ label }}</h2>
+  <p class="hint">Último scan <code>{{ scan.scan_id }}</code> em {{ scan.started_at.astimezone().strftime("%d/%m/%Y %H:%M") }} ·
+    nota <b class="grade-{{ scan.grade }}">{{ scan.grade }}</b> {{ scan.score }}/100.
+    Clique num achado para ver a explicação e como corrigir. Se você não puder corrigir (ex.: o modem é da operadora),
+    <b>aceite o risco</b>: ele sai da nota a partir do próximo scan.</p>
+  <div class="filters">
+    <label>Severidade mínima
+      <select id="f-sev">
+        {% for s in severities %}<option value="{{ s.rank }}"{% if s.value == "info" %} selected{% endif %}>{{ s.value }}</option>{% endfor %}
+      </select></label>
+    <label>Dispositivo
+      <select id="f-dev"><option value="">todos</option>
+        {% for d in device_names %}<option>{{ d }}</option>{% endfor %}</select></label>
+    <label><input type="checkbox" id="f-acc" checked> mostrar aceitos</label>
+    <span class="hint" id="f-count"></span>
+  </div>
+</section>
+
+<section>
+  {% for r in rows %}{% set f = r.f %}
+  <details class="finding{% if r.accepted_now %} accepted{% endif %}" data-rank="{{ f.severity.rank }}"
+           data-device="{{ r.device }}" data-accepted="{{ 1 if r.accepted_now else 0 }}">
+    <summary>
+      <span class="sev sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
+      <span class="t">{{ f.title }}</span>
+      <span class="hint">{{ r.device }} · <code>{{ f.location }}</code></span>
+    </summary>
+    <div class="body">
+      {% if f.acceptance or r.pending %}<p class="hint"><b>Risco aceito:</b> {{ f.acceptance or "vale a partir do próximo scan" }}</p>{% endif %}
+      {% if f.description %}<p>{{ f.description }}</p>{% endif %}
+      {% if f.evidence %}<span class="label">Evidência</span><pre>{{ f.evidence }}</pre>{% endif %}
+      {% if f.remediation %}<span class="label">Como corrigir</span><p>{{ f.remediation }}</p>{% endif %}
+      {% for ref in f.references %}<a href="{{ ref }}" target="_blank" rel="noopener noreferrer">{{ ref }}</a><br>{% endfor %}
+      <div style="margin-top:8px">
+        {% if r.accepted_now %}
+          <button class="btn ghost" data-unaccept="{{ f.fingerprint }}">Desfazer aceitação</button>
+        {% else %}
+          <button class="btn ghost" data-open="{{ f.fingerprint }}">Aceitar risco…</button>
+          <div class="accept-form" id="form-{{ f.fingerprint }}">
+            <input type="text" placeholder="Motivo (ex.: modem da operadora, chamado aberto)" size="40">
+            <label class="hint">válido até <input type="date"></label>
+            <button class="btn" data-accept="{{ f.fingerprint }}">Aceitar</button>
+            <span class="msg hint"></span>
+          </div>
+        {% endif %}
+        <span class="hint" style="margin-left:8px">id <code>{{ f.fingerprint[:8] }}</code></span>
+      </div>
+    </div>
+  </details>
+  {% else %}
+  <p class="ok">Nenhum achado neste scan. 🎉</p>
+  {% endfor %}
+</section>
+
+<script>
+const label = {{ label | tojson }};
+function applyFilters() {
+  const min = +document.getElementById("f-sev").value, dev = document.getElementById("f-dev").value;
+  const showAcc = document.getElementById("f-acc").checked;
+  let n = 0;
+  document.querySelectorAll("details.finding").forEach(d => {
+    const show = +d.dataset.rank >= min && (!dev || d.dataset.device === dev) && (showAcc || d.dataset.accepted === "0");
+    d.hidden = !show; if (show) n++;
+  });
+  document.getElementById("f-count").textContent = n + " exibido(s)";
+}
+["f-sev", "f-dev", "f-acc"].forEach(id => document.getElementById(id).addEventListener("change", applyFilters));
+applyFilters();
+
+document.addEventListener("click", async (e) => {
+  const open = e.target.closest("[data-open]");
+  if (open) { document.getElementById("form-" + open.dataset.open).classList.toggle("open"); return; }
+  const acc = e.target.closest("[data-accept]");
+  if (acc) {
+    const form = document.getElementById("form-" + acc.dataset.accept);
+    const [reason, until] = form.querySelectorAll("input");
+    const msg = form.querySelector(".msg");
+    try {
+      await tbmPost("/api/accept", {fingerprint: acc.dataset.accept, label, reason: reason.value, until: until.value || null});
+      location.reload();
+    } catch (err) { msg.textContent = err.message; msg.className = "msg error"; }
+    return;
+  }
+  const un = e.target.closest("[data-unaccept]");
+  if (un && confirm("O achado volta a contar na nota a partir do próximo scan. Desfazer?")) {
+    try { await tbmPost("/api/unaccept", {fingerprint: un.dataset.unaccept}); location.reload(); }
+    catch (err) { alert(err.message); }
+  }
+});
+</script>
+{% endblock %}

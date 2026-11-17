@@ -51,7 +51,33 @@
   .label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
   .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); margin: 1px 3px 1px 0; }
   .loading { opacity: .6; }
+  nav.gui { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 4px; }
+  nav.gui a { margin: 0; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--line);
+              background: var(--panel); text-decoration: none; color: var(--text); font-weight: 600; }
+  nav.gui a.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  nav.gui a.here { border-color: var(--accent); }
+  .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent);
+         background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  .btn.ghost { background: transparent; color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  input[type=text], input[type=date], select, textarea { font: inherit; padding: 7px 9px; border-radius: 8px;
+         border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .hint { font-size: 13px; color: var(--muted); }
+  .error { color: var(--critical); font-weight: 600; }
+  .ok { color: var(--good); font-weight: 600; }
 </style>
+{% if gui %}<meta name="tbm-token" content="{{ csrf_token }}">
+<script>
+/* Ações da interface: o token vem desta página (outro site não consegue lê-lo). */
+async function tbmPost(url, data) {
+  const token = document.querySelector('meta[name="tbm-token"]').content;
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json", "X-TBM-Token": token},
+                              body: JSON.stringify(data)});
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || ("HTTP " + r.status));
+  return body;
+}
+</script>{% endif %}
 <script>
 /* Carregador mínimo de fragmentos: substitui o HTMX para o dashboard funcionar
    sem internet. [data-get] busca a URL e coloca o HTML em [data-target]
@@ -84,8 +110,20 @@
 <body>
 <main>
   <h1>🐭🐭🐭 threeblindmice</h1>
+  {% if gui %}
+  <div class="muted">Interface local · v{{ version }}</div>
+  <nav class="gui">
+    <a href="/scan" class="primary">＋ Novo scan</a>
+    <a href="/">Visão geral</a>
+    <a href="/findings">Achados</a>
+    <a href="/inventory">Dispositivos</a>
+    <a href="/features">Funcionalidades</a>
+  </nav>
+  <script>document.querySelectorAll("nav.gui a").forEach(a => { if (a.getAttribute("href") !== "/" ? location.pathname.startsWith(a.getAttribute("href")) : location.pathname === "/") a.classList.add("here"); });</script>
+  {% else %}
   <div class="muted">Dashboard local · somente leitura · v{{ version }}</div>
   <nav><a href="/">Visão geral</a>{% for l in nav_labels %}<a href="/inventory/{{ l | urlencode }}">Dispositivos · {{ l }}</a>{% endfor %}</nav>
+  {% endif %}
   {% block content %}{% endblock %}
 </main>
 </body>

@@ -1,0 +1,145 @@
+{% extends "base.html.j2" %}
+{% block title %}Novo scan · threeblindmice{% endblock %}
+{% block content %}
+<style>
+  .opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .opt:last-child { border-bottom: 0; }
+  .opt input[type=checkbox] { margin-top: 4px; width: 18px; height: 18px; }
+  .opt b, .opt label .hint { display: block; }
+  .row { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+  label.field { display: block; font-weight: 600; margin-bottom: 4px; }
+  .phase { margin: 10px 0; } .phase .name { font-size: 13px; display: flex; justify-content: space-between; }
+  .bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 4px; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .warn { border-left: 3px solid var(--medium); padding: 6px 10px; margin-top: 6px; }
+  .big { font-size: 40px; font-weight: 800; }
+</style>
+
+<section style="margin-top:18px" id="form-section">
+  <h2>Novo scan</h2>
+  <p class="hint">O tbm descobre os aparelhos da rede, testa os serviços de cada um e dá uma nota de 0 a 100.
+    Só redes privadas são aceitas aqui. Para escanear um IP público (ex.: seu VPS), use a linha de comando com um <code>scope.yaml</code>.</p>
+  <form id="scan-form">
+    <div class="row">
+      <div>
+        <label class="field" for="targets">O que escanear</label>
+        <input type="text" id="targets" value="{{ suggested }}" style="width:100%" required>
+        <div class="hint">Detectamos a sua rede como <code>{{ suggested }}</code>. Também aceita um IP (<code>192.168.0.10</code>),
+          uma faixa (<code>192.168.0.10-50</code>) ou vários, separados por vírgula.</div>
+      </div>
+      <div>
+        <label class="field" for="label">Nome do histórico</label>
+        <input type="text" id="label" value="{{ label }}" style="width:100%" required>
+        <div class="hint">Scans com o mesmo nome são comparados entre si.</div>
+      </div>
+    </div>
+
+    <label class="field" style="margin-top:16px" for="ports">Portas</label>
+    <select id="ports">
+      <option value="common" selected>Comuns (86 portas, recomendado)</option>
+      <option value="web">Só web (HTTP/HTTPS)</option>
+      <option value="all">Todas (65.535; bem mais lento)</option>
+    </select>
+
+    <div style="margin-top:12px">
+      <div class="opt"><input type="checkbox" id="udp" checked>
+        <label for="udp"><b>Testar serviços UDP</b><span class="hint">Encontra SNMP, UPnP, mDNS, DNS e NTP. Acrescenta poucos segundos.</span></label></div>
+      <div class="opt"><input type="checkbox" id="cve" checked>
+        <label for="cve"><b>Procurar vulnerabilidades conhecidas (CVEs)</b><span class="hint">Consulta as bases públicas do NIST, da FIRST e do Ubuntu com o nome e a versão dos programas encontrados. Nenhum dado da sua rede é enviado.</span></label></div>
+      <div class="opt"><input type="checkbox" id="gentle">
+        <label for="gentle"><b>Modo cuidadoso</b><span class="hint">Mais lento e leve. Use se câmeras, lâmpadas ou outros aparelhos baratos travarem durante o scan.</span></label></div>
+      <div class="opt"><input type="checkbox" id="active">
+        <label for="active"><b>Testes ativos</b><span class="hint">Tenta login anônimo no FTP, pergunta ao SSH quais logins aceita e procura arquivos sensíveis nos sites.</span>
+          <div class="warn hint">Aparece nos logs dos aparelhos como tentativa de acesso. Use só em equipamentos seus.</div></label></div>
+    </div>
+
+    <div style="margin-top:16px">
+      <button class="btn" id="start" type="submit">Iniciar scan</button>
+      <span id="form-msg" class="hint" style="margin-left:10px"></span>
+    </div>
+  </form>
+</section>
+
+<section id="progress-section" hidden>
+  <h2 id="progress-title">Escaneando…</h2>
+  <div id="phases"></div>
+  <div id="log" class="hint"></div>
+  <div id="result"></div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+
+$("scan-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("start").disabled = true;
+  $("form-msg").textContent = "";
+  $("form-msg").className = "hint";
+  try {
+    const body = await tbmPost("/api/scan", {
+      targets: $("targets").value, label: $("label").value, ports: $("ports").value,
+      udp: $("udp").checked, cve: $("cve").checked, gentle: $("gentle").checked, active: $("active").checked,
+    });
+    watch(body.job);
+  } catch (err) {
+    $("form-msg").textContent = err.message;
+    $("form-msg").className = "error";
+    $("start").disabled = false;
+  }
+});
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+function render(job) {
+  $("phases").innerHTML = job.phases.filter(p => p.total > 0).map(p => {
+    const pct = Math.min(100, Math.round(100 * p.done / p.total));
+    return `<div class="phase"><div class="name"><span>${esc(p.name)}</span><span>${p.done}/${p.total}</span></div>
+            <div class="bar"><div style="width:${pct}%"></div></div></div>`;
+  }).join("");
+  $("log").innerHTML = job.log.map(l => "· " + esc(l)).join("<br>");
+}
+
+function done(job) {
+  const s = job.summary;
+  $("progress-title").textContent = `Pronto em ${job.elapsed}s`;
+  const counts = Object.entries(s.counts).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(" · ") || "nenhum achado";
+  const delta = s.score_delta ? ` (${s.score_delta > 0 ? "+" : ""}${s.score_delta})` : "";
+  const changes = s.previous
+    ? `<p>Desde o scan anterior: <b>${s.new_findings}</b> achado(s) novo(s), <b>${s.resolved}</b> resolvido(s).` +
+      (s.new_devices.length ? `<br>Dispositivos inéditos: ${s.new_devices.map(esc).join(", ")}` : "") + "</p>"
+    : "<p class='hint'>Primeiro scan deste histórico: os próximos serão comparados com este.</p>";
+  const alert = s.alerted === true ? "<p class='ok'>Alerta enviado.</p>"
+              : s.alerted === false ? "<p class='hint'>Nada inédito para alertar.</p>" : "";
+  $("result").innerHTML = `
+    <div style="display:flex;gap:24px;align-items:center;margin:14px 0">
+      <div class="big grade-${s.grade}">${s.grade}</div>
+      <div>${s.score}/100${delta}<br>${s.hosts} dispositivo(s) · ${counts}${s.accepted ? ` · ${s.accepted} aceito(s)` : ""}</div>
+    </div>
+    ${changes}${alert}
+    <p><a class="btn" href="/findings/${encodeURIComponent(s.label)}">Ver achados</a>
+       <a class="btn ghost" href="/inventory/${encodeURIComponent(s.label)}">Dispositivos</a>
+       <a class="btn ghost" href="/scan/${s.scan_id}" target="_blank">Relatório completo</a>
+       <button class="btn ghost" onclick="location.reload()">Novo scan</button></p>`;
+}
+
+async function watch(jobId) {
+  $("form-section").hidden = true;
+  $("progress-section").hidden = false;
+  while (true) {
+    const r = await fetch("/api/jobs/" + jobId);
+    const job = await r.json();
+    render(job);
+    if (job.status === "done") { done(job); return; }
+    if (job.status === "error") {
+      $("progress-title").textContent = "O scan falhou";
+      $("result").innerHTML = `<p class="error">${esc(job.error)}</p><button class="btn ghost" onclick="location.reload()">Voltar</button>`;
+      return;
+    }
+    await new Promise(res => setTimeout(res, 700));
+  }
+}
+
+{% if running %}watch("{{ running }}");{% endif %}
+</script>
+{% endblock %}

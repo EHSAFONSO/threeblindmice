@@ -7,6 +7,11 @@ o dashboard não vira um scanner controlável pela rede.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tbm.dashboard.jobs import JobRunner
+    from tbm.dashboard.security import GuiSettings
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -67,12 +72,18 @@ def build_inventory(history: list[ScanResult]) -> list[dict]:
     return sorted(devices, key=lambda d: (-d["total"], d["host"].address))
 
 
-def create_app(store: HistoryStore) -> FastAPI:
-    app = FastAPI(title="threeblindmice", version=__version__, docs_url=None, redoc_url=None)
+def create_app(store: HistoryStore, gui: GuiSettings | None = None,
+               runner: JobRunner | None = None) -> FastAPI:
+    """Sem `gui`: dashboard somente leitura (`tbm dashboard`). Com `gui`: interface completa
+    (`tbm gui`), que dispara scans e por isso exige token de sessão (ver security.py)."""
+    app = FastAPI(title="threeblindmice", version=__version__, docs_url=None, redoc_url=None,
+                  openapi_url=None)
 
     def render(name: str, **ctx) -> HTMLResponse:
         nav = [r["label"] for r in store.labels()]
-        return HTMLResponse(_env.get_template(name).render(version=__version__, nav_labels=nav, **ctx))
+        return HTMLResponse(_env.get_template(name).render(
+            version=__version__, nav_labels=nav, gui=gui is not None,
+            csrf_token=gui.token if gui else "", **ctx))
 
     def series(label: str, limit: int = 30) -> list:
         return list(reversed(store.list(label, limit)))
@@ -124,4 +135,9 @@ def create_app(store: HistoryStore) -> FastAPI:
     def api_scans(label: str | None = None, limit: int = 50) -> JSONResponse:
         return JSONResponse([dict(r) for r in store.list(label, min(limit, 500))])
 
+    if gui is not None:
+        from tbm.dashboard.gui import install_gui
+        from tbm.dashboard.jobs import JobRunner
+
+        install_gui(app, store, gui, render, runner or JobRunner(store))
     return app

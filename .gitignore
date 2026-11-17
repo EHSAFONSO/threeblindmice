@@ -10,6 +10,8 @@ build/
 .tbm/
 reports/
 scope.yaml
+# cartas geradas por `tbm letter` (têm nome, MAC e dados da sua rede)
+chamado*.txt
 # relatórios gerados pelo tbm (os templates são .html.j2 e não casam com isto)
 *.html
 !integration/web/html/*.html

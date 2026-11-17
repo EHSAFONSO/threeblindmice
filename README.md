@@ -21,7 +21,21 @@ pip install -e ".[dev]"          # ou ".[web]" só para o dashboard, ou "." para
 tbm update-oui                   # opcional: base de fabricantes de placas de rede (IEEE, ~3 MB)
 ```
 
-## Uso
+## Interface gráfica
+
+```bash
+tbm gui
+```
+
+Abre o navegador numa interface local onde você pode:
+- **fazer um scan** com a sua rede já preenchida, as opções explicadas e o progresso ao vivo;
+- ver os **achados** com filtros, explicação e como corrigir, e **aceitar riscos** com um clique;
+- consultar os **dispositivos** e a evolução da nota;
+- conhecer **todas as funcionalidades**, com o comando equivalente de cada uma.
+
+A interface escuta só em `127.0.0.1` e exige o token de sessão que vem no link aberto pelo comando. As ações têm proteção contra CSRF e DNS rebinding (veja [security.py](src/tbm/dashboard/security.py)). O `tbm dashboard` continua existindo, somente leitura.
+
+## Uso pela linha de comando
 
 ```bash
 # Os três juntos: rede de casa, com UDP e rótulo para o histórico

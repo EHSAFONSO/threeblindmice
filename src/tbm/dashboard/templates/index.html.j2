@@ -1,7 +1,11 @@
 {% extends "base.html.j2" %}
 {% block content %}
   {% if not labels %}
-  <section style="margin-top:22px"><p>Nenhum scan no histórico ainda. Rode <code>tbm scan 192.168.0.0/24 --label casa</code>.</p></section>
+  <section style="margin-top:22px">
+    {% if gui %}<h2>Bem-vindo!</h2><p>Nenhum scan ainda. Comece descobrindo o que há na sua rede.</p>
+      <p><a class="btn" href="/scan">Fazer o primeiro scan</a> <a class="btn ghost" href="/features">Ver o que o programa faz</a></p>
+    {% else %}<p>Nenhum scan no histórico ainda. Rode <code>tbm scan 192.168.0.0/24 --label casa</code>.</p>{% endif %}
+  </section>
   {% else %}
   <div class="cards">
     {% for r in labels %}

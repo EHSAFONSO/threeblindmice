@@ -45,6 +45,38 @@ SSDP_DISCOVER = (
 )
 
 
+# ───────────────────────────── rede local ─────────────────────────────
+
+
+def local_ipv4() -> str | None:
+    """IP desta máquina na rede principal.
+
+    `connect()` num socket UDP não envia pacote nenhum: só faz o SO escolher a
+    rota e o IP de origem, que lemos com getsockname(). 192.0.2.1 é um endereço
+    de documentação (TEST-NET-1), nunca roteado.
+    """
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def suggested_target() -> str:
+    """A /24 da rede local, para preencher o formulário da interface."""
+    import ipaddress
+
+    ip = local_ipv4()
+    if ip:
+        addr = ipaddress.ip_address(ip)
+        if addr.is_private and not addr.is_loopback:
+            return str(ipaddress.ip_network(f"{ip}/24", strict=False))
+    return "192.168.0.0/24"
+
+
 # ───────────────────────────── ping ─────────────────────────────
 
 

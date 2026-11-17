@@ -1,0 +1,49 @@
+{% extends "base.html.j2" %}
+{% block title %}Funcionalidades · threeblindmice{% endblock %}
+{% block content %}
+<style>
+  .tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .tool { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .tool h3 { margin: 0 0 6px; font-size: 15px; }
+  .tool code { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); word-break: break-all; }
+  .mode { font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 1px 8px; border-radius: 99px;
+          border: 1px solid var(--line); }
+  .mode.ativo { border-color: var(--medium); color: var(--medium); }
+</style>
+
+<section style="margin-top:18px">
+  <h2>O que o threeblindmice faz</h2>
+  <p class="hint">São três "ratos": o <b>Scout</b> descobre os aparelhos e serviços, o <b>Sniffer</b> analisa os riscos
+    e o <b>Squeak</b> dá a nota, compara com scans anteriores e avisa você. Cada recurso abaixo também tem um comando
+    equivalente para a linha de comando.</p>
+  <div class="tools">
+    {% for t in tools %}
+    <div class="tool">
+      <h3>{% if t.link %}<a href="{{ t.link }}">{{ t.title }}</a>{% else %}{{ t.title }}{% endif %}</h3>
+      <div>{{ t.description }}</div>
+      <code>{{ t.cli }}</code>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section>
+  <h2>Verificações ({{ checks | length }})</h2>
+  <p class="hint"><b>Passivas</b> só observam o que o serviço mostra. <b>Ativas</b> interagem (ex.: tentam login anônimo)
+    e só rodam com "Testes ativos" ligado.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Verificação</th><th>O que verifica</th><th>Por que importa</th></tr></thead>
+    <tbody>
+    {% for c in checks %}
+      <tr>
+        <td><b>{{ c.name }}</b><br><span class="mode {{ c.mode.split()[0] }}">{{ c.mode }}</span><br><code class="hint">{{ c.id }}</code></td>
+        <td>{{ c.what }}</td>
+        <td class="hint">{{ c.why }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endblock %}

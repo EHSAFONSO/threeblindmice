@@ -827,6 +827,33 @@ def telegram_setup(
                       f"  export TBM_WEBHOOK='tg://<token>/{chat.id}'", markup=False)
 
 
+@app.command()
+def gui(
+    port: Annotated[int, typer.Option(help="Porta local da interface.")] = 8770,
+    no_browser: Annotated[bool, typer.Option("--no-browser", help="Não abre o navegador.")] = False,
+) -> None:
+    """[bold]Interface gráfica[/] no navegador: novo scan, achados, dispositivos e funcionalidades."""
+    try:
+        import uvicorn
+
+        from tbm.dashboard import create_app
+        from tbm.dashboard.security import GuiSettings
+    except ImportError as exc:
+        raise _fail('dependências da interface ausentes: pip install "threeblindmice[web]"') from exc
+    import threading
+    import webbrowser
+
+    # Sempre 127.0.0.1 e sem opção de mudar: a interface dispara scans (ver dashboard/security.py).
+    settings = GuiSettings(port=port)
+    url = settings.login_url()
+    console.print(BANNER.format(v=__version__))
+    console.print(f"Interface em [bold]{url}[/]")
+    console.print("[dim]O link tem um token de sessão: não compartilhe. Ctrl+C para encerrar.[/]")
+    if not no_browser:
+        threading.Timer(1.2, webbrowser.open, args=(url,)).start()
+    uvicorn.run(create_app(HistoryStore(), gui=settings), host="127.0.0.1", port=port, log_level="warning")
+
+
 @app.command("update-oui")
 def update_oui() -> None:
     """Baixa a base de fabricantes de placas de rede (IEEE OUI, ~3 MB)."""
