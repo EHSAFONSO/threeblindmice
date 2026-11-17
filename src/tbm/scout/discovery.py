@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from functools import partial
 
 from tbm.asyncutil import gather_limited
+from tbm.paths import no_window
 from tbm.scout import wire
 
 MDNS_GROUP = ("224.0.0.251", 5353)
@@ -99,7 +100,7 @@ async def ping(ip: str, timeout: float = 1.0) -> bool:
     try:
         proc = await asyncio.create_subprocess_exec(
             *ping_command(ip, timeout), stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL, **no_window(),
         )
         out, _ = await asyncio.wait_for(proc.communicate(), timeout + 3)
     except (OSError, TimeoutError):
@@ -134,7 +135,7 @@ async def default_gateway() -> str | None:
                 return parse_default_gateway(fh.read(), "linux")
         cmd = ["route", "print", "-4", "0.0.0.0"] if sys.platform == "win32" else ["route", "-n", "get", "default"]
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, **no_window()
         )
         out, _ = await asyncio.wait_for(proc.communicate(), 5)
     except (OSError, TimeoutError):

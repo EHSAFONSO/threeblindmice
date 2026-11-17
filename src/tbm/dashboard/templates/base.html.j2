@@ -117,6 +117,8 @@ async function tbmPost(url, data) {
     <a href="/">Visão geral</a>
     <a href="/findings">Achados</a>
     <a href="/inventory">Dispositivos</a>
+    <a href="/alerts">Alertas</a>
+    <a href="/watch">Vigia</a>
     <a href="/features">Funcionalidades</a>
   </nav>
   <script>document.querySelectorAll("nav.gui a").forEach(a => { if (a.getAttribute("href") !== "/" ? location.pathname.startsWith(a.getAttribute("href")) : location.pathname === "/") a.classList.add("here"); });</script>

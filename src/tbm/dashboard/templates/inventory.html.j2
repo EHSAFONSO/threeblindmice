@@ -18,7 +18,7 @@
         <td><code>{{ d.host.address }}</code>{% if d.ips | length > 1 %}<br><span class="muted">antes: {{ d.ips[:-1] | join(", ") }}</span>{% endif %}</td>
         <td>{% if d.host.mac %}<code>{{ d.host.mac }}</code><br><span class="muted">{{ d.host.vendor or "fabricante desconhecido" }}</span>{% else %}—{% endif %}</td>
         <td>{% for s in d.host.services %}<code>{{ s.port }}{% if s.transport == "udp" %}/udp{% endif %}</code> {% else %}<span class="muted">nenhuma</span>{% endfor %}</td>
-        <td>{% if d.counts.critical %}<span class="c">{{ d.counts.critical }}C</span> {% endif %}{% if d.counts.high %}<span class="h">{{ d.counts.high }}H</span> {% endif %}{% if d.counts.medium %}<span class="m">{{ d.counts.medium }}M</span> {% endif %}{% if d.counts.low %}<span class="l">{{ d.counts.low }}L</span>{% endif %}{% if not d.total %}<span class="muted">—</span>{% endif %}{% if d.accepted %}<br><span class="muted">{{ d.accepted }} aceito(s)</span>{% endif %}</td>
+        <td>{% if d.counts.critical %}<span class="c">{{ d.counts.critical }}C</span> {% endif %}{% if d.counts.high %}<span class="h">{{ d.counts.high }}H</span> {% endif %}{% if d.counts.medium %}<span class="m">{{ d.counts.medium }}M</span> {% endif %}{% if d.counts.low %}<span class="l">{{ d.counts.low }}L</span>{% endif %}{% if not d.total %}<span class="muted">—</span>{% endif %}{% if d.accepted %}<br><span class="muted">{{ d.accepted }} aceito(s)</span>{% endif %}{% if gui and d.total %}<br><a href="/letter?label={{ label | urlencode }}&host={{ d.host.address | urlencode }}" style="font-size:13px">carta para o provedor →</a>{% endif %}</td>
         <td><span class="muted">1º: {{ d.first_seen }}<br>{{ d.times_seen }}× de {{ scans_seen }}</span></td>
       </tr>
     {% endfor %}

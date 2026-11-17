@@ -24,6 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel, field_validator
 
+from tbm.config import notify_target
 from tbm.models import ScanResult, Severity, utcnow
 from tbm.paths import cache_dir, tbm_home
 from tbm.pipeline import ScanJob, execute
@@ -164,7 +165,7 @@ class JobRunner:
             report = tbm_home() / "reports" / f"tbm-{result.label}-{result.started_at:%Y%m%d-%H%M%S}.html"
             write_report(result, report, diff)
             alerted = None
-            if webhook := os.environ.get("TBM_WEBHOOK"):
+            if webhook := notify_target()[0]:
                 try:
                     alerted = loop.run_until_complete(send_webhook(webhook, result, diff, Severity.MEDIUM))
                 except Exception as exc:  # noqa: BLE001 (o alerta não invalida o scan)

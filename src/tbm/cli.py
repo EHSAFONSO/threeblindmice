@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import subprocess
 import sys
 import time
 from datetime import date, datetime
@@ -27,6 +26,7 @@ from rich.progress import (
 from rich.table import Table
 
 from tbm import __version__, schedule
+from tbm.config import config_path, notify_target, persist_notify
 from tbm.models import Finding, Host, ScanResult, Severity
 from tbm.paths import cache_dir
 from tbm.pipeline import ScanJob, execute, finalize, run_sniffer
@@ -293,7 +293,7 @@ NoBackportOpt = Annotated[bool, typer.Option("--no-backport", help="Não consult
 SecretsOpt = Annotated[Path | None, typer.Option("--secrets", help="Também procura segredos neste diretório.", exists=True)]
 DisableOpt = Annotated[list[str], typer.Option("--disable", "-x", help="Desativa um check ou grupo (ex.: http, cve.nvd).")]
 MaxCvesOpt = Annotated[int, typer.Option(help="Máximo de CVEs por serviço.")]
-NotifyOpt = Annotated[str | None, typer.Option(help="Destino do alerta: URL do Discord/Slack, tg://<token>/<chat>, ntfy://<tópico> ou webhook JSON. Também lê TBM_WEBHOOK.")]
+NotifyOpt = Annotated[str | None, typer.Option(help="Destino do alerta: URL do Discord/Slack, tg://<token>/<chat>, ntfy://<tópico> ou webhook JSON. Padrão: o destino configurado (TBM_WEBHOOK ou tbm gui → Alertas).")]
 GentleOpt = Annotated[bool, typer.Option("--gentle", help="Modo cuidadoso para IoT frágil: 16 sockets, 50 conexões/s.")]
 RateOpt = Annotated[float | None, typer.Option("--rate", help="Máximo de conexões TCP por segundo.")]
 NoPingOpt = Annotated[bool, typer.Option("--no-ping", help="Descoberta sem ping ICMP.")]
@@ -360,7 +360,7 @@ def scan(
     out = report or Path("reports") / f"tbm-{label}-{result.started_at:%Y%m%d-%H%M%S}.html"
     write_report(result, out, diff)
     console.print(f"Relatório: [link=file://{out.resolve()}]{out}[/]  ·  scan_id [cyan]{result.scan_id}[/]")
-    _run(_notify(notify or os.environ.get("TBM_WEBHOOK"), result, diff, min_severity))
+    _run(_notify(notify or notify_target()[0], result, diff, min_severity))
     raise typer.Exit(_exit_code(result.findings, fail_on))
 
 
@@ -387,7 +387,7 @@ def watch(
         raise _fail(str(exc)) from exc
     sc = _scope(scope)
     sc.resolve(targets)  # falha cedo se o escopo estiver errado
-    webhook = notify or os.environ.get("TBM_WEBHOOK")
+    webhook = notify or notify_target()[0]
     job = ScanJob(
         specs=targets, scope=sc, label=label, no_evidence=no_evidence,
         scout_options=_scout_options(ports, 1.0, 400, False, udp, gentle=gentle),
@@ -744,10 +744,10 @@ def schedule_remove(
 
 @app.command("notify-test")
 def notify_test(notify: NotifyOpt = None) -> None:
-    """Envia uma mensagem de teste para o destino de alertas (ou para TBM_WEBHOOK)."""
-    target = notify or os.environ.get("TBM_WEBHOOK")
+    """Envia uma mensagem de teste para o destino de alertas configurado."""
+    target = notify or notify_target()[0]
     if not target:
-        raise _fail("informe --notify ou defina a variável TBM_WEBHOOK")
+        raise _fail("nenhum destino configurado: use tbm telegram-setup, a página Alertas do tbm gui ou --notify")
     try:
         status = _run(send_test(target))
     except ValueError as exc:
@@ -765,9 +765,9 @@ def notify_test(notify: NotifyOpt = None) -> None:
 
 @app.command("telegram-setup")
 def telegram_setup(
-    save: Annotated[bool | None, typer.Option("--save/--no-save", help="Grava TBM_WEBHOOK sem perguntar (ou não grava).")] = None,
+    save: Annotated[bool | None, typer.Option("--save/--no-save", help="Grava o destino sem perguntar (ou não grava).")] = None,
 ) -> None:
-    """Conecta o Telegram: valida o token, acha o chat_id, envia um teste e salva TBM_WEBHOOK."""
+    """Conecta o Telegram: valida o token, acha o chat_id, envia um teste e salva o destino dos alertas."""
     console.print("Crie o bot com o [bold]@BotFather[/] (/newbot) e copie o token.\n"
                   "[dim]O token não aparece na tela enquanto você digita ou cola.[/]")
     token = typer.prompt("Token do bot", hide_input=True).strip()
@@ -810,21 +810,16 @@ def telegram_setup(
     console.print("[green]Mensagem de teste enviada.[/] Confira no Telegram.")
 
     if save is None:
-        save = typer.confirm("Salvar como TBM_WEBHOOK (variável do seu usuário, usada pelos scans e pelo agendador)?",
+        save = typer.confirm("Salvar como destino dos alertas (usado pelos scans, pela interface e pelo agendador)?",
                              default=True)
     if not save:
         console.print("[dim]Nada foi salvo. Use --notify tg://<token>/" + str(chat.id) + " nos comandos.[/]")
         return
-    if sys.platform == "win32":
-        # setx grava em HKCU\Environment; o valor não aparece na tela nem no histórico.
-        proc = subprocess.run(["setx", "TBM_WEBHOOK", url], capture_output=True, text=True, check=False)
-        if proc.returncode != 0:
-            raise _fail("setx falhou: " + (proc.stderr or proc.stdout).strip())
-        console.print("[green]Salvo.[/] Vale para terminais [bold]novos[/] e para o agendador. "
-                      "Neste terminal, abra um novo ou rode o scan com --notify.")
-    else:
-        console.print("Adicione ao seu ~/.bashrc ou ~/.zshrc (troque <token> pelo token do bot):\n"
-                      f"  export TBM_WEBHOOK='tg://<token>/{chat.id}'", markup=False)
+    # Grava em TBM_HOME/config.json (só o seu usuário lê). O token não aparece na tela.
+    notes = persist_notify(url)
+    console.print(f"[green]Salvo[/] em {config_path()}.")
+    for n in notes:
+        console.print(f"[dim]{n}[/]")
 
 
 @app.command()

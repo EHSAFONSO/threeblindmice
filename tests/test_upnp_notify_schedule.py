@@ -235,11 +235,14 @@ def test_schedule_windows_plan():
     [cmd] = plan.commands
     assert cmd[:4] == ["schtasks", "/Create", "/TN", task_name("casa")]
     assert cmd[cmd.index("/SC") + 1] == "HOURLY" and cmd[cmd.index("/MO") + 1] == "6"
-    # /TR aponta para um .cmd curto; o comando longo (com webhook) vai dentro dele
+    # /TR chama `pythonw -m tbm._scheduled casa`: sem janela e curto; os argumentos vão num JSON
     tr = cmd[cmd.index("/TR") + 1]
-    assert tr.endswith('.cmd"') and len(tr) < 261
-    [(wrapper, script)] = plan.files.items()
-    assert "--label casa" in script and "--udp" in script
+    assert "-m tbm._scheduled casa" in tr and len(tr) < 261
+    [(spec_path, content)] = plan.files.items()
+    spec = json.loads(content)
+    assert spec["argv"][:2] == ["scan", "192.168.100.0/24"] and "--udp" in spec["argv"]
+    assert "--notify" not in spec["argv"]  # o destino vem da configuração, não do agendamento
+    assert [p.suffix for p in plan.cleanup] == [".cmd"]  # reinstalar apaga o formato antigo
 
 
 def test_schedule_windows_long_webhook_fits():
@@ -247,7 +250,10 @@ def test_schedule_windows_long_webhook_fits():
     plan = build_plan("win32", ["192.168.100.0/24"], "casa", 3600, ["--notify", hook])
     tr = plan.commands[0][plan.commands[0].index("/TR") + 1]
     assert len(tr) < 261 and hook in next(iter(plan.files.values()))
-    assert remove_plan("win32", "casa").commands[0][:2] == ["schtasks", "/Delete"]
+    assert plan.warnings  # recomenda configurar o destino em vez de gravar no agendamento
+    removal = remove_plan("win32", "casa")
+    assert removal.commands[0][:2] == ["schtasks", "/Delete"]
+    assert {p.suffix for p in removal.cleanup} == {".json", ".cmd"}  # apaga o formato novo e o antigo
 
 
 def test_schedule_linux_and_cron_plans(monkeypatch):

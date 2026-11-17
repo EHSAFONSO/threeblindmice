@@ -89,11 +89,11 @@ TOOLS: list[Feature] = [
     Feature("O que mudou", "Compara com o scan anterior: aparelhos novos, portas abertas, achados "
             "novos e resolvidos.", "tbm diff <scan_antigo> <scan_novo>"),
     Feature("Alertas", "Avisa no Telegram, ntfy, Discord ou Slack só quando aparece algo inédito.",
-            "tbm telegram-setup  ·  tbm notify-test"),
-    Feature("Vigia automático", "Agenda o scan no Windows/Linux para rodar sozinho.",
-            "tbm schedule install 192.168.0.0/24 -l casa --every 6h --udp"),
+            "tbm telegram-setup  ·  tbm notify-test", "/alerts"),
+    Feature("Vigia automático", "Agenda o scan no Windows/Linux para rodar sozinho, sem abrir janela.",
+            "tbm schedule install 192.168.0.0/24 -l casa --every 6h --udp", "/watch"),
     Feature("Carta para o provedor", "Gera o texto do chamado com os problemas do modem da operadora.",
-            "tbm letter 192.168.100.175 -l casa -o chamado.txt"),
+            "tbm letter 192.168.100.175 -l casa -o chamado.txt", "/letter"),
     Feature("Segredos em código", "Procura senhas e tokens esquecidos numa pasta.", "tbm secrets C:\\projeto"),
 ]
 

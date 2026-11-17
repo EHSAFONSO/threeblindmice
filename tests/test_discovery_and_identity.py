@@ -179,6 +179,20 @@ def test_returning_device_is_not_alerted_as_new():
     assert len(d.new_hosts) == 1 and d.alert_hosts == []
 
 
+def test_missing_mac_in_one_scan_is_not_a_new_device():
+    """Caso real: a leitura do ARP falhou num scan (sem MAC) e funcionou no seguinte."""
+    def scan(mac):
+        h = Host(address="192.168.100.175", mac=mac, services=[Service(port=23)])
+        f = Finding(check_id="service.exposed", title="Telnet", severity=Severity.HIGH,
+                    host=h.address, port=23, device=h.identity)
+        return finalize(ScanResult(hosts=[h], findings=[f], ports_scanned=[23]))
+
+    for old, new in ((scan(None), scan("cc:ba:bd:99:74:01")), (scan("cc:ba:bd:99:74:01"), scan(None))):
+        d = diff_scans(old, new)
+        assert not d.new_hosts and not d.gone_hosts, d
+        assert not d.new_findings and not d.resolved_findings and len(d.persisting_findings) == 1
+
+
 def test_upgrade_from_ip_fingerprints_does_not_flood_alerts():
     """Scan antigo (sem `device`) x scan novo (com `device`): nada deve parecer novo."""
     legacy = Finding(check_id="service.exposed", title="Telnet", severity=Severity.HIGH,

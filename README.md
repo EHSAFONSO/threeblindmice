@@ -31,7 +31,12 @@ Abre o navegador numa interface local onde você pode:
 - **fazer um scan** com a sua rede já preenchida, as opções explicadas e o progresso ao vivo;
 - ver os **achados** com filtros, explicação e como corrigir, e **aceitar riscos** com um clique;
 - consultar os **dispositivos** e a evolução da nota;
+- configurar **alertas** (assistente do Telegram, ntfy, Discord/Slack), com mensagem de teste antes de salvar;
+- ligar o **vigia automático**, que roda sem abrir janela e mostra a próxima execução e a saída das últimas;
+- gerar a **carta para o provedor** de qualquer equipamento com achados;
 - conhecer **todas as funcionalidades**, com o comando equivalente de cada uma.
+
+O destino dos alertas fica em `~/.threeblindmice/config.json`, legível só pelo seu usuário. A ordem de prioridade é `--notify`, depois a variável `TBM_WEBHOOK`, depois o arquivo.
 
 A interface escuta só em `127.0.0.1` e exige o token de sessão que vem no link aberto pelo comando. As ações têm proteção contra CSRF e DNS rebinding (veja [security.py](src/tbm/dashboard/security.py)). O `tbm dashboard` continua existindo, somente leitura.
 

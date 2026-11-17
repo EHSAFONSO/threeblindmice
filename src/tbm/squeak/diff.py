@@ -82,10 +82,30 @@ def diff_scans(old: ScanResult | None, new: ScanResult) -> ScanDiff:
     # usam a chave antiga, por IP, uma única vez.
     legacy = any(f.device is None and f.host != "local" for f in old.findings) and any(
         f.device for f in new.findings)
-    key = legacy_key if legacy else (lambda f: f.fingerprint)
-    old_f = {key(f): f for f in old.findings}
-    new_f = {key(f): f for f in new.findings}
-    old_by_id = {h.identity: h for h in old.hosts}
+
+    # MAC intermitente: se a leitura da tabela ARP falhar num scan (timeout, rede
+    # lenta), o mesmo aparelho aparece com identidade "ip:…" num lado e "mac:…" no
+    # outro. No teste real, isso gerou "+14 novos, -13 resolvidos" sem nada ter
+    # mudado. Mesmo IP, com MAC em só um dos lados, conta como o mesmo aparelho.
+    old_by_ip = {h.address: h for h in old.hosts}
+    new_by_ip = {h.address: h for h in new.hosts}
+    alias: dict[str, str] = {}  # identidade antiga → nova
+    for ip in old_by_ip.keys() & new_by_ip.keys():
+        o, n = old_by_ip[ip], new_by_ip[ip]
+        if o.identity != n.identity and (not o.mac or not n.mac):
+            alias[o.identity] = n.identity
+
+    def key(f: Finding, side_old: bool) -> str:
+        if legacy:
+            return legacy_key(f)
+        device = f.device or f.host
+        if side_old:
+            device = alias.get(device, device)
+        return f"{f.check_id}|{device}|{f.port}|{f.key}"
+
+    old_f = {key(f, True): f for f in old.findings}
+    new_f = {key(f, False): f for f in new.findings}
+    old_by_id = {alias.get(h.identity, h.identity): h for h in old.hosts}
     new_by_id = {h.identity: h for h in new.hosts}
     common = old_by_id.keys() & new_by_id.keys()
 
@@ -112,8 +132,6 @@ def diff_scans(old: ScanResult | None, new: ScanResult) -> ScanDiff:
         opened += [(n.address, p, t) for p, t in _ports(n) - _ports(o) if comparable(p, t)]
         closed += [(n.address, p, t) for p, t in _ports(o) - _ports(n) if comparable(p, t)]
 
-    old_by_ip = {h.address: h for h in old.hosts}
-    new_by_ip = {h.address: h for h in new.hosts}
     mac_changes = sorted(
         (ip, old_by_ip[ip].mac, new_by_ip[ip].mac)
         for ip in old_by_ip.keys() & new_by_ip.keys()

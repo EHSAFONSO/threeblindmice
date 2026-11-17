@@ -1,0 +1,63 @@
+{% extends "base.html.j2" %}
+{% block title %}Carta para o provedor · threeblindmice{% endblock %}
+{% block content %}
+<style>
+  label.field { display: block; font-weight: 600; margin: 12px 0 4px; }
+  textarea { width: 100%; min-height: 420px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+</style>
+
+<section style="margin-top:18px">
+  <h2>Carta para o provedor</h2>
+  <p class="hint">Muitos problemas de uma rede doméstica estão em aparelhos que você não controla, como o modem ou
+    ONT da operadora. A saída é abrir um chamado. Esta página escreve o texto com os achados, as evidências e pedidos
+    concretos, para você copiar e enviar pelo canal de atendimento.</p>
+  {% if not label %}
+    <p>Faça um <a href="/scan">scan</a> primeiro.</p>
+  {% elif not candidates %}
+    <p class="ok">Nenhum equipamento com achados de severidade média ou maior no último scan de "{{ label }}". 🎉</p>
+  {% else %}
+  <label class="field" for="lbl">Histórico</label>
+  <select id="lbl" onchange="location.href='/letter?label=' + encodeURIComponent(this.value)">
+    {% for l in labels %}<option{% if l == label %} selected{% endif %}>{{ l }}</option>{% endfor %}
+  </select>
+  <label class="field" for="host">Equipamento</label>
+  <select id="host">
+    {% for c in candidates %}<option value="{{ c.address }}"{% if c.address == selected %} selected{% endif %}>
+      {{ c.label }} · {{ c.count }} achado(s)</option>{% endfor %}
+  </select>
+  <label class="field" for="name">Seu nome (para a assinatura)</label>
+  <input type="text" id="name" size="30" autocomplete="name">
+  <label class="field" for="min">Incluir achados a partir de</label>
+  <select id="min"><option value="high">alta</option><option value="medium" selected>média</option><option value="low">baixa</option></select>
+  <p><button class="btn" id="gen">Gerar carta</button> <span id="msg" class="hint"></span></p>
+  {% endif %}
+</section>
+
+<section id="out" hidden>
+  <textarea id="text" spellcheck="true"></textarea>
+  <p class="hint">Revise e ajuste antes de enviar. O texto não é salvo em lugar nenhum.</p>
+  <p><button class="btn" id="copy">Copiar</button> <button class="btn ghost" id="download">Baixar .txt</button>
+     <span id="msg2" class="hint"></span></p>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+$("gen")?.addEventListener("click", async () => {
+  try {
+    const r = await tbmPost("/api/letter", {label: {{ (label or "") | tojson }}, host: $("host").value,
+                                             name: $("name").value, min_severity: $("min").value});
+    $("text").value = r.text; $("out").hidden = false; $("msg").textContent = "";
+    $("out").scrollIntoView({behavior: "smooth"});
+  } catch (e) { $("msg").textContent = e.message; $("msg").className = "error"; }
+});
+$("copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("text").value); $("msg2").textContent = "Copiado."; }
+  catch { $("text").select(); document.execCommand("copy"); $("msg2").textContent = "Copiado."; }
+});
+$("download").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([$("text").value], {type: "text/plain;charset=utf-8"}));
+  a.download = "chamado-" + $("host").value + ".txt"; a.click(); URL.revokeObjectURL(a.href);
+});
+</script>
+{% endblock %}

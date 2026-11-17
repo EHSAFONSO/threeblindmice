@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 
 from tbm import USER_AGENT
-from tbm.paths import tbm_home
+from tbm.paths import no_window, tbm_home
 
 OUI_URL = "https://standards-oui.ieee.org/oui/oui.csv"
 _IP_RE = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3})\b")
@@ -60,7 +60,7 @@ async def read_arp_table() -> dict[str, str]:
     cmd = ["arp", "-a"] if sys.platform == "win32" else ["arp", "-an"]
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, **no_window()
         )
         out, _ = await asyncio.wait_for(proc.communicate(), 10)
     except (OSError, TimeoutError):
