@@ -124,7 +124,8 @@ def browser():
 @pytest.fixture
 def page(browser, server):
     login, _, _ = server
-    ctx = browser.new_context(viewport={"width": 1200, "height": 900})
+    # locale fixo: o navegador do CI pede en-US, e a interface obedeceria (os textos aqui são em português)
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900}, locale="pt-BR")
     pg = ctx.new_page()
     errors: list[str] = []
     pg.on("pageerror", lambda e: errors.append(str(e)))

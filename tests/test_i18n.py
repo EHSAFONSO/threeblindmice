@@ -13,6 +13,8 @@ from tbm.dashboard import create_app
 from tbm.dashboard.jobs import JobRunner
 from tbm.dashboard.security import GuiSettings
 from tbm.locale_en import EN
+from tbm.models import Finding, Host, ScanResult, Service, Severity
+from tbm.pipeline import finalize
 from tbm.squeak import HistoryStore
 from tbm.squeak.actions import KINDS
 
@@ -72,10 +74,20 @@ def test_language_choice():
 
 @pytest.fixture
 def gui(tmp_path, monkeypatch):
-    from tests.test_visual import home_scan
+    ont = Host(address="192.168.100.175", mac="cc:ba:bd:99:74:01", device_type="roteador/modem",
+               services=[Service(port=22), Service(port=23)])
+
+    def f(check, title, sev, port, key=""):
+        return Finding(check_id=check, title=title, severity=sev, host=ont.address, port=port, key=key,
+                       device=ont.identity)
 
     store = HistoryStore(tmp_path / "h.db")
-    store.save(home_scan())
+    store.save(finalize(ScanResult(label="casa", gateway=ont.address, hosts=[ont], findings=[
+        f("cve.nvd", "CVE-2021-36369 em Dropbear", Severity.HIGH, 22, "CVE-2021-36369"),
+        f("ssh.algorithms", "SSH aceita key exchange fraco", Severity.MEDIUM, 22, "kex"),
+        f("ssh.algorithms", "SSH aceita MACs fracos", Severity.LOW, 22, "mac"),
+        f("service.exposed", "Telnet exposto", Severity.HIGH, 23),
+    ])))
     settings = GuiSettings(port=8770, extra_hosts={"testserver"})
     client = TestClient(create_app(store, gui=settings, runner=JobRunner(store)))
     client.get(f"/?token={settings.token}")
