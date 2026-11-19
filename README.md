@@ -28,10 +28,17 @@ Para gerar o instalador você mesmo: `pip install -e ".[desktop]" pyinstaller` e
 
 ### Pelo Python (Windows, Linux e macOS)
 
+Para usar, basta `pip install "threeblindmice[desktop]"`, ou `[web]` só para a interface no navegador. Se quiser a mesma proteção de cadeia de suprimentos do projeto, só wheels e versões com 3 dias ou mais, use `pip install --only-binary :all: --no-binary proxy-tools --uploaded-prior-to P3D "threeblindmice[desktop]"`.
+
+Para desenvolver, com as versões exatas do lock (veja [Cadeia de suprimentos](#cadeia-de-suprimentos)):
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows  (Linux/macOS: source .venv/bin/activate)
-pip install -e ".[dev]"          # ou ".[web]" só para o dashboard, ou "." para o básico
+copy requirements\pip.conf .venv\pip.ini     # Linux/macOS: cp requirements/pip.conf .venv/pip.conf
+python -m pip install --require-hashes --only-binary :all: --no-deps -r requirements/bootstrap.txt
+python -m pip install --require-hashes --no-build-isolation -r requirements/desktop.txt
+python -m pip install --no-deps --no-build-isolation -e .
 tbm update-oui                   # opcional: base de fabricantes de placas de rede (IEEE, ~3 MB)
 ```
 
@@ -178,6 +185,25 @@ src/tbm/
 - **Parsers sob fuzzing:** tudo que interpreta bytes de aparelhos alheios só pode levantar o erro documentado. O `hypothesis` testa milhares de entradas malformadas a cada execução.
 - **UPnP sem SSRF:** o LOCATION e o controlURL vêm do roteador; só seguimos URLs para o mesmo IP já validado pelo escopo.
 - **Escopo em duas camadas, prioridade KEV > EPSS > CVSS, backport via dpkg, dashboard somente leitura:** detalhes nos docstrings de cada módulo.
+
+## Cadeia de suprimentos
+
+Um pacote sequestrado no PyPI rodaria com as permissões do CI, de quem publica no PyPI ou de quem instala o setup.exe. Por isso, nada entra sem estar travado:
+
+| Camada | Como |
+|---|---|
+| Versões exatas | `requirements/*.txt` (o "package-lock" do projeto), gerados pelo `uv` para Windows, Linux e macOS de uma vez, com o SHA-256 de cada arquivo. Um arquivo trocado no PyPI não instala. |
+| Sem scripts de instalação | Só wheels (`only-binary = :all:`): instalar não executa `setup.py`. O build não baixa ferramentas soltas (`--no-build-isolation`, com hatchling e setuptools travados). A única exceção é o `proxy-tools` (dependência do pywebview, sem wheel no PyPI): são 178 linhas revisadas, travadas pelo hash. |
+| Idade mínima de 3 dias | `uploaded-prior-to = P3D` no pip e `exclude-newer = "3 days"` no uv: versões recém-publicadas, que é quando um sequestro costuma ser descoberto e removido, ficam de fora. |
+| GitHub Actions | Fixadas pelo SHA do commit, não pela tag (uma tag pode ser movida para código malicioso). |
+| Imagens Docker | Fixadas por digest (`python:3.12-slim@sha256:…`), inclusive as do laboratório de integração. |
+| Uma porta de entrada | O CI instala tudo pela action [.github/actions/install](.github/actions/install/action.yml). O [test_supply_chain.py](tests/test_supply_chain.py) falha se aparecer um `pip install` solto, uma Action sem SHA, uma imagem sem digest ou um pacote sem hash. |
+
+A política do pip fica em [requirements/pip.conf](requirements/pip.conf). O CI e o Docker a usam via `PIP_CONFIG_FILE`; no seu venv, copie para `.venv/pip.ini` (Windows) ou `.venv/pip.conf`.
+
+Para atualizar as dependências, rode `python requirements/lock.py --upgrade` (precisa do `uv`). Ele só escolhe versões com 3 dias ou mais. Depois confira o diff dos locks e rode `pip-audit -r requirements/desktop.txt --no-deps --disable-pip` para checar vulnerabilidades conhecidas.
+
+As faixas (`>=`) do `pyproject.toml` continuam, de propósito: quem instala o tbm do PyPI como biblioteca precisa de flexibilidade. O travamento vale para o que o projeto constrói e distribui: o CI, a imagem Docker, o pacote do PyPI e o setup.exe.
 
 ## Testes e CI
 

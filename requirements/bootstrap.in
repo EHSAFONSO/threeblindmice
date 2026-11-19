@@ -1,0 +1,5 @@
+# Instalado primeiro, com o pip que vier no Python: um pip recente o bastante
+# para entender --uploaded-prior-to, e o setuptools para construir (sem
+# isolamento, ou seja, sem baixar nada solto) o único pacote sem wheel.
+pip
+setuptools

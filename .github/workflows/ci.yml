@@ -14,12 +14,11 @@ jobs:
     name: lint + types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: ./.github/actions/install
         with:
           python-version: "3.12"
-          cache: pip
-      - run: pip install -e ".[dev]"
+          lock: dev
       - run: ruff check src tests
       # Checa os tipos como se estivesse em cada SO: código específico de
       # plataforma (ex.: asyncio.ProactorEventLoop, só no Windows) passava
@@ -38,19 +37,18 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: ./.github/actions/install
         with:
           python-version: ${{ matrix.python }}
-          cache: pip
-      - run: pip install -e ".[dev]"
+          lock: dev
       - run: pytest -q
 
   integration:
     # Sobe serviços vulneráveis de propósito e roda o tbm contra eles, dentro da rede do Compose.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       # Serviços em segundo plano e só o scanner em primeiro plano: se um serviço
       # cair, apenas o teste dele falha (com --abort-on-container-exit, um crash
       # derrubava o scanner antes de qualquer assert).
@@ -73,13 +71,14 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: ./.github/actions/install
         with:
           python-version: "3.12"
-      - run: pip install .
+          lock: runtime
+          editable: "false"
       - run: tbm secrets . --output tbm-secrets.sarif --no-fail
-      - uses: github/codeql-action/upload-sarif@v4
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4
         with:
           sarif_file: tbm-secrets.sarif
           category: tbm-secrets

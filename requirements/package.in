@@ -1,0 +1,2 @@
+# Empacotamento do instalador do Windows (packaging/windows/build.py).
+pyinstaller

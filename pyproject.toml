@@ -40,6 +40,17 @@ tbm = "tbm.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tbm"]
 
+# Cadeia de suprimentos. As faixas (>=) acima valem para quem instala o tbm do
+# PyPI; o CI, o Docker e o instalador do Windows usam os locks em requirements/,
+# com versões exatas e hashes. Para regenerar: python requirements/lock.py
+[tool.uv.pip]
+universal = true  # um lock só para Windows, Linux e macOS
+python-version = "3.11"  # a menor versão suportada
+generate-hashes = true
+exclude-newer = "3 days"  # ignora versões publicadas há menos de 3 dias
+only-binary = [":all:"]  # só wheels: nenhum setup.py roda na instalação
+no-binary = ["proxy-tools"]  # única exceção: sem wheel no PyPI (código revisado, travado pelo hash)
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

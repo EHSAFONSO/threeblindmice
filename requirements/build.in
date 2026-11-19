@@ -1,0 +1,5 @@
+# Backend de build do próprio tbm. Travado aqui e usado com --no-build-isolation:
+# sem isso, o pip baixaria a última versão do hatchling a cada instalação.
+hatchling
+editables  # usado pelo hatchling no `pip install -e .`
+build
