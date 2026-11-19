@@ -156,6 +156,7 @@ class Announcement:
     ssdp_server: str | None = None
     ssdp_location: str | None = None
     ssdp_types: set[str] = field(default_factory=set)
+    ipv6: set[str] = field(default_factory=set)  # registros AAAA anunciados
 
     @property
     def best_name(self) -> str | None:
@@ -196,10 +197,14 @@ def absorb_mdns(found: dict[str, Announcement], data: bytes, source: str) -> Non
         elif stype:
             ann.services.add(stype)
             ann.instances.add(target)
-    for name, ip in resp.a_records().items():
+    a_records = resp.a_records()
+    for name, ip in a_records.items():
         # O registro A diz o nome do aparelho; atribuímos ao IP do registro
         # (normalmente igual à origem do pacote).
         found.setdefault(ip, Announcement()).names.add(name)
+    for name, addresses in resp.aaaa_records().items():
+        # IPv6 vai para o mesmo aparelho do registro A de mesmo nome
+        found.setdefault(a_records.get(name, source), Announcement()).ipv6.update(addresses)
 
 
 def absorb_ssdp(found: dict[str, Announcement], data: bytes, source: str) -> None:

@@ -21,7 +21,7 @@ Baixe o `threeblindmice_<versão>_x64-setup.exe` na [página de releases](https:
 O instalador ainda não tem assinatura digital, então o Windows pode mostrar "O Windows protegeu o computador": clique em *Mais informações* e depois em *Executar assim mesmo*. Antes, confira que o arquivo é o original comparando o SHA-256 com o do arquivo `.sha256` publicado na release:
 
 ```bash
-certutil -hashfile threeblindmice_0.7.1_x64-setup.exe SHA256
+certutil -hashfile threeblindmice_0.8.0_x64-setup.exe SHA256
 ```
 
 Para gerar o instalador você mesmo: `pip install -e ".[desktop]" pyinstaller` e `python packaging/windows/build.py` (precisa do [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
@@ -54,12 +54,14 @@ Abre o navegador numa interface local onde você pode:
 - ver os **achados agrupados pela correção** ("atualizar o firmware do modem resolve 4 achados"), priorizados por KEV/EPSS, e **aceitar riscos** com um clique;
 - explorar o **mapa da rede** (internet → roteador → aparelhos, colorido pelo pior problema, com aviso de NAT duplo) e os **dispositivos**, cada um com painel de detalhes;
 - acompanhar a **linha do tempo** da nota, com os scans que trouxeram mudanças marcados;
+- dar **nome** aos aparelhos e **aprovar** os que são seus: aparelho desconhecido na rede chega como alerta destacado;
+- seguir o **passo a passo da correção no seu roteador**: a marca (ZTE, Huawei, Nokia, TP-Link, Intelbras, Fiberhome, Tenda, D-Link, Mercusys) é deduzida do que o próprio aparelho revela;
 - configurar **alertas** (assistente do Telegram, ntfy, Discord/Slack), com mensagem de teste antes de salvar;
 - ligar o **vigia automático**, que roda sem abrir janela e mostra a próxima execução e a saída das últimas;
 - gerar a **carta para o provedor** de qualquer equipamento com achados;
 - conhecer **todas as funcionalidades**, com o comando equivalente de cada uma.
 
-Tem tema claro, escuro ou automático, funciona só com teclado e não carrega nada de fora (CSS, JS e ícones são locais). O relatório HTML (o "Relatório completo" da interface, ou o `.html` gerado pelo `tbm run`) traz as ações por prioridade e sai bem impresso ou em PDF.
+Tem tema claro, escuro ou automático, em **português ou inglês** (botão PT/EN, ou o idioma do navegador), funciona só com teclado e não carrega nada de fora (CSS, JS e ícones são locais). O relatório HTML (o "Relatório completo" da interface, ou o `.html` gerado pelo `tbm run`) traz as ações por prioridade e sai bem impresso ou em PDF.
 
 O destino dos alertas fica em `~/.threeblindmice/config.json`, legível só pelo seu usuário. A ordem de prioridade é `--notify`, depois a variável `TBM_WEBHOOK`, depois o arquivo.
 
@@ -132,6 +134,30 @@ Destinos de `--notify` (ou `TBM_WEBHOOK`):
 | Discord / Slack | URL do webhook |
 | Qualquer outro | URL https (recebe um POST com JSON completo) |
 
+### O que mais o scan olha
+
+Além dos aparelhos, o scan da rede local verifica:
+
+- **Wi-Fi**: a criptografia da rede em que o computador está (aberta, WEP, WPA/TKIP, WPA2, WPA3);
+- **IPv6**: aparelhos com endereço IPv6 público e portas que também respondem por ele. No IPv6 não há NAT, então só o firewall do roteador protege;
+- **nomes**: quando o DNS não sabe o nome do aparelho, o tbm pergunta direto a ele, via NetBIOS e LLMNR.
+
+Com `--external` (na interface, "Verificações externas") entram mais dois testes, que mandam o seu IP público para serviços de terceiros:
+
+- **o que a internet vê**: as portas do seu IP público, segundo o Shodan InternetDB;
+- **DNS sequestrado**: compara as respostas do DNS do roteador com o DNS da Cloudflare (DoH), e acusa sinais de roteador invadido.
+
+### Resumo semanal e novas versões
+
+Com um destino de alertas configurado, o vigia manda uma vez por semana um **resumo**: a nota, o que mudou e a próxima ação, mesmo sem novidade. Assim você sabe que ele continua rodando. Para controlar:
+
+```bash
+tbm summary --label casa --send      # manda agora
+tbm summary --disable                # desliga o automático
+```
+
+A interface avisa quando há **versão nova** no GitHub (uma consulta por dia). O tbm só avisa: não baixa nem instala nada sozinho. Junto com o aviso vêm o SHA-256 publicado e o comando para verificar o atestado. Para desligar: `tbm update --disable`.
+
 ### Outros comandos
 
 ```bash
@@ -197,6 +223,9 @@ Um pacote sequestrado no PyPI rodaria com as permissões do CI, de quem publica 
 | Idade mínima de 3 dias | `uploaded-prior-to = P3D` no pip e `exclude-newer = "3 days"` no uv: versões recém-publicadas, que é quando um sequestro costuma ser descoberto e removido, ficam de fora. |
 | GitHub Actions | Fixadas pelo SHA do commit, não pela tag (uma tag pode ser movida para código malicioso). |
 | Imagens Docker | Fixadas por digest (`python:3.12-slim@sha256:…`), inclusive as do laboratório de integração. |
+| Origem comprovada | Cada release traz atestados de origem (SLSA, assinados pelo Sigstore) do wheel, do sdist, do setup.exe e da imagem Docker, e listas de componentes (SBOM CycloneDX). Para conferir: `gh attestation verify <arquivo> --repo EHSAFONSO/threeblindmice`. |
+| Vulnerabilidades | O `pip-audit` roda no CI contra os três locks. |
+| Atualização com quarentena | O Dependabot propõe Actions e imagens novas com espera (cooldown) de 3 dias. Toda segunda, o [lock-refresh.yml](.github/workflows/lock-refresh.yml) regenera os locks com o `uv` e o `pip-audit` e publica um branch para revisão. |
 | Uma porta de entrada | O CI instala tudo pela action [.github/actions/install](.github/actions/install/action.yml). O [test_supply_chain.py](tests/test_supply_chain.py) falha se aparecer um `pip install` solto, uma Action sem SHA, uma imagem sem digest ou um pacote sem hash. |
 
 A política do pip fica em [requirements/pip.conf](requirements/pip.conf). O CI e o Docker a usam via `PIP_CONFIG_FILE`; no seu venv, copie para `.venv/pip.ini` (Windows) ou `.venv/pip.conf`.
@@ -208,16 +237,19 @@ As faixas (`>=`) do `pyproject.toml` continuam, de propósito: quem instala o tb
 ## Testes e CI
 
 ```bash
-pytest -q                     # unitários + fuzzing, sem rede externa
+pytest -q                     # unitários, fuzzing e interface no navegador, sem rede externa
+pytest -m e2e                 # só a interface no navegador (Playwright + Edge/Chrome já instalados)
 mypy src                      # tipos
 docker compose -f integration/compose.yml up -d --build --wait redis ftp web ssh snmp
 docker compose -f integration/compose.yml run --rm --build scanner
 docker compose -f integration/compose.yml down -v
 ```
 
-O CI ([ci.yml](.github/workflows/ci.yml)) roda ruff, mypy, testes em Linux/Windows/macOS × Python 3.11–3.13, o laboratório de integração e o `tbm secrets` com SARIF.
+O CI ([ci.yml](.github/workflows/ci.yml)) roda ruff, mypy, testes em Linux/Windows/macOS × Python 3.11–3.13, a interface num navegador de verdade (Chrome e Edge), o `pip-audit`, o laboratório de integração e o `tbm secrets` com SARIF.
 
-Releases ([release.yml](.github/workflows/release.yml)): uma tag `vX.Y.Z` roda o CI e publica no PyPI (trusted publishing, configurado uma vez em pypi.org), a imagem em `ghcr.io/<dono>/threeblindmice` e o GitHub Release.
+Releases ([release.yml](.github/workflows/release.yml)): uma tag `vX.Y.Z` roda o CI e publica no PyPI (trusted publishing, configurado uma vez em pypi.org), a imagem em `ghcr.io/<dono>/threeblindmice` e o GitHub Release, todos com atestados e SBOM.
+
+**Assinatura do setup.exe:** o [SignPath](https://signpath.org) assina de graça projetos de código aberto. Depois de aprovado lá, crie no repositório as variáveis `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG` e `SIGNPATH_POLICY_SLUG` e o segredo `SIGNPATH_API_TOKEN`. O release passa a assinar o instalador sozinho, e o aviso do SmartScreen some.
 
 ## Limitações conhecidas
 

@@ -56,6 +56,14 @@ KINDS: dict[str, FixKind] = {k.key: k for k in (
     FixKind("snmp", "Desativar o SNMP ou trocar a senha padrão em {dev}",
             "Com a senha padrão 'public', qualquer um lê a configuração completa do aparelho.", isp=True),
     FixKind("secret", "Remover a credencial de {dev}", "Senhas em código acabam em backups e repositórios."),
+    FixKind("wifi", "Reforçar a segurança da {dev}",
+            "Criptografia fraca no Wi-Fi deixa vizinhos entrarem na rede e lerem o tráfego."),
+    FixKind("ipv6fw", "Conferir o firewall IPv6 de {dev}",
+            "Sem NAT no IPv6, só o firewall do roteador separa os aparelhos da internet.", isp=True),
+    FixKind("dns", "Corrigir o DNS de {dev}",
+            "DNS adulterado manda você para sites falsos mesmo digitando o endereço certo.", isp=True),
+    FixKind("exposure", "Fechar o que a internet vê em {dev}",
+            "Portas visíveis da internet são varridas por robôs o tempo todo.", isp=True),
 )}
 
 _PORT_KIND = {23: "telnet", 21: "ftp", 3389: "remote", 5900: "remote", 445: "smb", 139: "smb", 7547: "tr069",
@@ -92,6 +100,14 @@ def classify(f: Finding) -> str | None:
         return "snmp"
     if cid == "secrets.local":
         return "secret"
+    if cid == "network.wifi":
+        return "wifi"
+    if cid == "network.ipv6":
+        return "ipv6fw"
+    if cid == "network.dns":
+        return "dns"
+    if cid == "network.external":
+        return "exposure"
     return None
 
 
@@ -132,10 +148,13 @@ class Action:
         return f"/letter?label={quote(label)}&host={quote(self.host)}"
 
 
+PSEUDO_HOSTS = {"wifi": "rede Wi-Fi", "local": "este computador"}
+
+
 def device_label(h: Host | None, fallback: str) -> str:
     if h is None:
-        return fallback
-    name = h.device_name or h.hostname
+        return PSEUDO_HOSTS.get(fallback, fallback)
+    name = h.name
     if name and h.device_type:
         return f"{name} ({h.device_type})"
     return name or (f"{h.device_type} {h.address}" if h.device_type else h.address)

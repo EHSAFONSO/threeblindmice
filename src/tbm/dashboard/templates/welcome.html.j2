@@ -1,39 +1,37 @@
 {% extends "base.html.j2" %}
-{% block title %}Bem-vindo · threeblindmice{% endblock %}
+{% block title %}{{ _("Bem-vindo") }} · threeblindmice{% endblock %}
 {% block content %}
-<ol class="steps" aria-label="Primeiros passos">
+<ol class="steps" aria-label="{{ _("Primeiros passos") }}">
   {% for name in ["Sua rede", "Primeiro scan", "Alertas", "Vigia"] %}
-  <li class="{{ 'active' if loop.index0 == 0 }}" data-step="{{ loop.index0 }}"><span class="n">{{ loop.index }}</span>{{ name }}</li>
+  <li class="{{ 'active' if loop.index0 == 0 }}" data-step="{{ loop.index0 }}"><span class="n">{{ loop.index }}</span>{{ _(name) }}</li>
   {% endfor %}
 </ol>
 <section class="card" style="max-width:760px">
   <div class="row" style="gap:18px;align-items:flex-start">
     <svg viewBox="0 0 256 256" width="64" height="64" aria-hidden="true"><use href="#i-logo"/></svg>
     <div style="flex:1">
-      <h1 style="font-size:24px;margin-bottom:8px">Bem-vindo ao threeblindmice</h1>
-      <p>Três "ratos" cuidam da sua rede: o <b>Scout</b> descobre os aparelhos, o <b>Sniffer</b> procura riscos e o
-        <b>Squeak</b> dá uma nota, compara com o passado e avisa você quando algo muda.</p>
+      <h1 style="font-size:24px;margin-bottom:8px">{{ _("Bem-vindo ao threeblindmice") }}</h1>
+      <p>{{ _("Três \"ratos\" cuidam da sua rede: o Scout descobre os aparelhos, o Sniffer procura riscos e o Squeak dá uma nota, compara com o passado e avisa você quando algo muda.") }}</p>
     </div>
   </div>
   <div class="banner" style="margin:16px 0">
     <svg class="icon" aria-hidden="true"><use href="#i-wifi"/></svg>
-    <div>Detectamos a sua rede como <b class="mono">{{ suggested }}</b> (o computador está em <span class="mono">{{ local_ip or "?" }}</span>).
-      O primeiro scan leva uns 20 segundos e é <b>passivo</b>: só observa, sem tentar login em nada.</div>
+    <div>{{ _("Detectamos a sua rede como {net} (o computador está em {ip}).", net=suggested, ip=local_ip or "?") }}
+      {{ _("O primeiro scan leva uns 20 segundos e é passivo: só observa, sem tentar login em nada.") }}</div>
   </div>
-  <h2 style="margin-top:18px">Como funciona</h2>
+  <h2 style="margin-top:18px">{{ _("Como funciona") }}</h2>
   <div class="grid cols-3" style="margin-bottom:18px">
     <div class="row" style="align-items:flex-start"><svg class="icon lg" aria-hidden="true"><use href="#i-radar"/></svg>
-      <div><b>1. Scan</b><div class="hint">Descobre aparelhos e serviços e dá uma nota de 0 a 100.</div></div></div>
+      <div><b>1. {{ _("Scan") }}</b><div class="hint">{{ _("Descobre aparelhos e serviços e dá uma nota de 0 a 100.") }}</div></div></div>
     <div class="row" style="align-items:flex-start"><svg class="icon lg" aria-hidden="true"><use href="#i-bell"/></svg>
-      <div><b>2. Alertas</b><div class="hint">Telegram, ntfy ou Discord, só quando aparece algo inédito.</div></div></div>
+      <div><b>2. {{ _("Alertas") }}</b><div class="hint">{{ _("Telegram, ntfy ou Discord, só quando aparece algo inédito.") }}</div></div></div>
     <div class="row" style="align-items:flex-start"><svg class="icon lg" aria-hidden="true"><use href="#i-eye"/></svg>
-      <div><b>3. Vigia</b><div class="hint">Repete o scan sozinho, de tempos em tempos.</div></div></div>
+      <div><b>3. {{ _("Vigia") }}</b><div class="hint">{{ _("Repete o scan sozinho, de tempos em tempos.") }}</div></div></div>
   </div>
   <div class="row">
-    <a class="btn" href="/scan"><svg class="icon" aria-hidden="true"><use href="#i-radar"/></svg>Fazer o primeiro scan</a>
-    <a class="btn subtle" href="/features">Ver tudo o que o programa faz</a>
+    <a class="btn" href="/scan"><svg class="icon" aria-hidden="true"><use href="#i-radar"/></svg>{{ _("Fazer o primeiro scan") }}</a>
+    <a class="btn subtle" href="/features">{{ _("Ver tudo o que o programa faz") }}</a>
   </div>
-  <p class="hint" style="margin-top:14px">Depois do primeiro scan, a página inicial vira o painel de saúde da rede, e os passos
-    de alertas e vigia ficam a um clique.</p>
+  <p class="hint" style="margin-top:14px">{{ _("Depois do primeiro scan, a página inicial vira o painel de saúde da rede, e os passos de alertas e vigia ficam a um clique.") }}</p>
 </section>
 {% endblock %}

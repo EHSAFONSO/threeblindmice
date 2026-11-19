@@ -61,6 +61,26 @@ class FingerprintBody(BaseModel):
     fingerprint: str
 
 
+class DeviceBody(BaseModel):
+    identity: str
+    alias: str | None = None
+    trusted: bool | None = None
+
+    @field_validator("identity")
+    @classmethod
+    def _identity(cls, v: str) -> str:
+        if not re.fullmatch(r"(mac|name|ip):[^\x00-\x1f]{1,120}", v):
+            raise ValueError("identidade inválida")
+        return v
+
+    @field_validator("alias")
+    @classmethod
+    def _alias(cls, v: str | None) -> str | None:
+        if v is not None and (len(v) > 40 or any(ord(c) < 32 for c in v)):
+            raise ValueError("nome com até 40 caracteres, sem quebras de linha")
+        return v
+
+
 class AlertBody(BaseModel):
     kind: Literal["telegram", "ntfy", "url"]
     token: str | None = None
@@ -158,6 +178,20 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
         st = status_cache[label][1]
         return render("status.html.j2", st=st, notify=describe(notify_target()[0]))
 
+    @app.get("/partials/update", response_class=HTMLResponse)
+    async def update_partial() -> HTMLResponse:
+        from tbm import update
+
+        release = await update.check()
+        return render("update.html.j2", release=release) if release else HTMLResponse("")
+
+    @app.post("/api/update/disable")
+    async def update_disable() -> JSONResponse:
+        from tbm import update
+
+        update.set_enabled(False)
+        return JSONResponse({"ok": True})
+
     # ───────────────────────── novo scan ─────────────────────────
 
     @app.get("/scan", response_class=HTMLResponse)
@@ -228,6 +262,17 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
                      title=match.title, location=match.location)
         return JSONResponse({"ok": True})
 
+    @app.post("/api/device")
+    async def device(request: Request) -> JSONResponse:
+        try:
+            body = DeviceBody.model_validate(await request.json())
+        except ValidationError as exc:
+            return JSONResponse({"error": _errors(exc)}, status_code=400)
+        if body.alias is None and body.trusted is None:
+            return JSONResponse({"error": "nada para alterar"}, status_code=400)
+        store.set_device(body.identity, alias=body.alias, trusted=body.trusted)
+        return JSONResponse({"ok": True})
+
     @app.post("/api/unaccept")
     async def unaccept(request: Request) -> JSONResponse:
         try:
@@ -249,8 +294,20 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
     @app.get("/alerts", response_class=HTMLResponse)
     def alerts_page() -> HTMLResponse:
         target, source = notify_target()
+        from tbm.squeak import summary
+
         return render("alerts.html.j2", current=describe(target), source=source,
-                      suggested_topic=f"tbm-{secrets.token_hex(5)}")
+                      suggested_topic=f"tbm-{secrets.token_hex(5)}", weekly=summary.enabled())
+
+    @app.post("/api/alerts/summary")
+    async def alerts_summary(request: Request) -> JSONResponse:
+        from tbm.squeak import summary
+
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            return JSONResponse({"error": "envie {enabled: true|false}"}, status_code=400)
+        summary.set_enabled(body["enabled"])
+        return JSONResponse({"ok": True, "enabled": body["enabled"]})
 
     @app.post("/api/telegram/lookup")
     async def telegram_lookup(request: Request) -> JSONResponse:

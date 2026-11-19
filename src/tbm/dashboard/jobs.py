@@ -45,6 +45,7 @@ class ScanParams(BaseModel):
     active: bool = False
     gentle: bool = False
     cve: bool = True
+    external: bool = False
 
     @field_validator("label")
     @classmethod
@@ -125,7 +126,7 @@ def build_scan_job(p: ScanParams) -> ScanJob:
     common: dict[str, Any] = dict(udp=p.udp, timeout=1.0)
     scout = ScoutOptions.gentle(ports, **common) if p.gentle else ScoutOptions(ports=ports, **common)
     sniffer = SnifferOptions(
-        active=p.active, cve=p.cve, nvd_api_key=os.environ.get("NVD_API_KEY"),
+        active=p.active, cve=p.cve, external=p.external, nvd_api_key=os.environ.get("NVD_API_KEY"),
         cache_dir=cache_dir("intel"), scope=scope,
     )
     return ScanJob(specs=targets, scope=scope, label=p.label, scout_options=scout, sniffer_options=sniffer)
@@ -179,6 +180,13 @@ class JobRunner:
                     alerted = loop.run_until_complete(send_webhook(webhook, result, diff, Severity.MEDIUM))
                 except Exception as exc:  # noqa: BLE001 (o alerta não invalida o scan)
                     job.log.append(f"falha ao enviar alerta: {exc.__class__.__name__}")
+                try:
+                    from tbm.squeak import summary
+
+                    if loop.run_until_complete(summary.maybe_send(self.store, result.label, webhook)):
+                        job.log.append("resumo semanal enviado")
+                except Exception as exc:  # noqa: BLE001
+                    job.log.append(f"falha ao enviar o resumo semanal: {exc.__class__.__name__}")
             job.summary = summarize(result, diff, report, alerted)
             job.status = "done"
         except ScopeError as exc:

@@ -95,7 +95,7 @@ def test_network_map_layout_and_double_nat_note():
     assert by_addr[None]["label"] == "Internet"
     assert by_addr[GW.address]["role"] == "gateway" and by_addr[ONT.address]["role"] == "router"
     assert by_addr[ONT.address]["sev"] == "high" and by_addr[PC.address]["role"] == "device"
-    assert any("NAT duplo" in n for n in m["notes"])
+    assert any("NAT duplo" in n["text"] for n in m["notes"])
     assert m["legend"]["high"] == 1
 
 
@@ -165,7 +165,7 @@ def test_health_findings_map_inventory_pages(gui):
     assert "Vigia ativo" in status and "Alertas desligados" in status
 
     findings = gui.client.get("/findings/casa").text
-    assert "O que corrigir" in findings and "resolve <b>3</b> achado(s)" in findings and "Informativos (1)" in findings
+    assert "O que corrigir" in findings and "resolve 3 achado(s)" in findings and "Informativos (1)" in findings
 
     page = gui.client.get("/map/casa").text
     assert 'class="netmap"' in page and "NAT duplo" in page and "roteador principal" in page

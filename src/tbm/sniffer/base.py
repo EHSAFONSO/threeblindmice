@@ -33,6 +33,9 @@ class SnifferOptions:
     http_timeout: float = 6.0
     epss: bool = True
     backport: bool = True  # consulta o tracker da distro para descartar CVEs já corrigidos
+    # Checks que falam com terceiros sobre a SUA conexão (Shodan InternetDB, DNS da
+    # Cloudflare): mandam o seu IP público para fora. Desligado por padrão.
+    external: bool = False
     # Escopo contra o qual os hosts são revalidados antes de qualquer check.
     # None = Scope.default() (somente redes privadas).
     scope: Scope | None = None

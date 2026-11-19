@@ -42,7 +42,40 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           lock: dev
-      - run: pytest -q
+      - run: pytest -q -m "not e2e"
+
+  e2e:
+    # A interface num navegador de verdade (Chrome no Linux, Edge no Windows), já instalado no runner:
+    # o Playwright não baixa navegador nenhum.
+    name: e2e (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: ./.github/actions/install
+        with:
+          python-version: "3.12"
+          lock: dev
+      - run: pytest -q -m e2e tests/e2e
+        env:
+          TBM_E2E_REQUIRED: "1"
+
+  audit:
+    # Vulnerabilidades conhecidas (OSV/PyPI) em tudo o que os locks instalam.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: ./.github/actions/install
+        with:
+          python-version: "3.12"
+          lock: dev
+      - run: |
+          for lock in runtime dev desktop; do
+            pip-audit -r "requirements/$lock.txt" --no-deps --disable-pip --progress-spinner off
+          done
 
   integration:
     # Sobe serviços vulneráveis de propósito e roda o tbm contra eles, dentro da rede do Compose.

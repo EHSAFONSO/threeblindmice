@@ -234,3 +234,8 @@ main > h2:first-child, main > section:first-child { margin-top: 0; }
   body { background: #fff; color: #000; } .card { box-shadow: none; break-inside: avoid; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important; } }
+
+/* guias de correção por modelo */
+details.guide { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--panel-2, transparent); }
+details.guide summary { cursor: pointer; font-weight: 650; display: flex; gap: 8px; align-items: center; }
+details.guide ol { margin: 10px 0 4px; padding-left: 20px; line-height: 1.55; }

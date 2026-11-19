@@ -100,6 +100,11 @@ class Host(BaseModel):
     device_type: str | None = None  # "roteador/modem", "celular Apple", "impressora"...
     device_name: str | None = None  # nome anunciado via mDNS/SSDP (ex.: "iPhone-de-Ana")
     discovery: dict[str, str] = Field(default_factory=dict)  # mdns, ssdp, http_title, como foi achado
+    ipv6: list[str] = Field(default_factory=list)  # endereços IPv6 *globais* (roteáveis na internet)
+    ipv6_services: list[int] = Field(default_factory=list)  # portas TCP abertas também via IPv6 global
+    # Do cadastro de aparelhos conhecidos (tbm devices / interface), não da rede:
+    alias: str | None = None  # nome que você deu ("TV da sala")
+    trusted: bool = False  # você aprovou: aparelho conhecido da casa
     services: list[Service] = Field(default_factory=list)
 
     def service(self, port: int, transport: str = "tcp") -> Service | None:
@@ -120,8 +125,13 @@ class Host(BaseModel):
         return f"ip:{self.address}"
 
     @property
+    def name(self) -> str | None:
+        """Melhor nome: o que você deu, o anunciado pelo aparelho ou o do DNS/NetBIOS."""
+        return self.alias or self.device_name or self.hostname
+
+    @property
     def display(self) -> str:
-        extras = [x for x in (self.device_name or self.hostname, self.device_type, self.vendor) if x]
+        extras = [x for x in (self.name, self.device_type, self.vendor) if x]
         return f"{self.address} ({' · '.join(dict.fromkeys(extras))})" if extras else self.address
 
 

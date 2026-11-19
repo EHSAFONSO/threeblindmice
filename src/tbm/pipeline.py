@@ -81,6 +81,7 @@ async def execute(job: ScanJob, store: HistoryStore, progress: ProgressHook | No
         targets=targets, specs=job.specs, scope_source=job.scope.source, label=job.label,
         scout_options=job.scout_options, sniffer_options=job.sniffer_options, progress=progress,
     )
+    store._hydrate(result)  # nomes e aprovações do cadastro de aparelhos
     if apply_acceptances(result, store.acceptances()):
         finalize(result)  # recalcula a nota sem os riscos aceitos
     if job.no_evidence:

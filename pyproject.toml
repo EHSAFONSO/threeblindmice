@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "threeblindmice"
-version = "0.7.1"
+version = "0.8.0"
 description = "Toolkit defensivo de avaliação de segurança: Scout (recon), Sniffer (análise) e Squeak (relatórios)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,6 +31,10 @@ dev = [
     "mypy>=1.10",
     "types-PyYAML",
     "Pillow>=10",
+    "playwright>=1.45",  # testes da interface no navegador (usa o Chrome/Edge já instalado)
+    "pip-audit>=2.7",  # vulnerabilidades conhecidas nos locks
+    "cyclonedx-bom>=4",  # SBOM das releases
+    "uv>=0.5",  # gera os locks (requirements/lock.py)
     "threeblindmice[web]",
 ]
 
@@ -56,7 +60,10 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["src"]
-markers = ["integration: precisa do ambiente Docker Compose (TBM_INTEGRATION=1)"]
+markers = [
+    "integration: precisa do ambiente Docker Compose (TBM_INTEGRATION=1)",
+    "e2e: interface no navegador (Playwright + Edge/Chrome instalados)",
+]
 filterwarnings = ["ignore:.*httpx2.*"]  # aviso interno do starlette.testclient
 
 [tool.mypy]
@@ -82,3 +89,5 @@ ignore = ["ASYNC109", "UP042"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/tbm/cli.py" = ["E501"]  # declarações de opções do Typer ficam mais legíveis numa linha
+"src/tbm/squeak/guides.py" = ["E501"]  # tabela de menus por marca: uma linha por caminho
+"src/tbm/locale_en.py" = ["E501"]  # catálogo de traduções: uma frase por linha

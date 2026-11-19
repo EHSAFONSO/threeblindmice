@@ -26,6 +26,16 @@ CREATE TABLE IF NOT EXISTS scans (
     data       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_scans_label_time ON scans(label, started_at);
+CREATE TABLE IF NOT EXISTS devices (
+    identity   TEXT PRIMARY KEY,   -- Host.identity (mac:…, name:… ou ip:…)
+    alias      TEXT,
+    trusted    INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 CREATE TABLE IF NOT EXISTS accepted (
     fingerprint TEXT PRIMARY KEY,
     label       TEXT,
@@ -88,7 +98,7 @@ class HistoryStore:
             ).fetchall()
         if len(rows) > 1:
             raise ValueError(f"prefixo ambíguo: {scan_id}")
-        return ScanResult.model_validate_json(rows[0]["data"]) if rows else None
+        return self._hydrate(ScanResult.model_validate_json(rows[0]["data"])) if rows else None
 
     def latest(self, label: str, *, exclude: str | None = None, before: str | None = None) -> ScanResult | None:
         query = "SELECT data FROM scans WHERE label = ? AND scan_id != ?"
@@ -98,7 +108,7 @@ class HistoryStore:
             params.append(before)
         with self._conn() as conn:
             row = conn.execute(query + " ORDER BY started_at DESC LIMIT 1", params).fetchone()
-        return ScanResult.model_validate_json(row["data"]) if row else None
+        return self._hydrate(ScanResult.model_validate_json(row["data"])) if row else None
 
     def list(self, label: str | None = None, limit: int = 20) -> list[sqlite3.Row]:
         query = ("SELECT scan_id, label, started_at, score, grade, hosts, findings, "
@@ -110,6 +120,38 @@ class HistoryStore:
         query += " ORDER BY started_at DESC LIMIT ?"
         with self._conn() as conn:
             return conn.execute(query, (*params, limit)).fetchall()
+
+    # ───────────────────────── aparelhos conhecidos ─────────────────────────
+
+    def devices(self) -> dict[str, sqlite3.Row]:
+        with self._conn() as conn:
+            return {r["identity"]: r for r in conn.execute("SELECT * FROM devices")}
+
+    def set_device(self, identity: str, *, alias: str | None = None, trusted: bool | None = None) -> None:
+        """Atualiza só o que foi passado (alias "" apaga o nome)."""
+        current = self.devices().get(identity)
+        new_alias = (alias.strip() or None) if alias is not None else (current["alias"] if current else None)
+        new_trusted = int(trusted) if trusted is not None else (current["trusted"] if current else 0)
+        with self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO devices VALUES (?,?,?,?)",
+                         (identity, new_alias, new_trusted, datetime.now(UTC).isoformat()))
+
+    def _hydrate(self, result: ScanResult) -> ScanResult:
+        """Aplica nomes e aprovações atuais, inclusive em scans antigos."""
+        known = self.devices()
+        for h in result.hosts:
+            if row := known.get(h.identity):
+                h.alias, h.trusted = row["alias"], bool(row["trusted"])
+        return result
+
+    def meta(self, key: str) -> str | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._conn() as conn:
+            conn.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, value))
 
     # ───────────────────────── riscos aceitos ─────────────────────────
 

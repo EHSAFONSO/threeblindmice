@@ -67,6 +67,20 @@ CHECKS: dict[str, CheckInfo] = {
     "secrets.local": CheckInfo(
         "Senhas, tokens e chaves privadas esquecidos em código e arquivos de configuração.",
         "Credencial em código acaba em backup, repositório e imagem de container."),
+    "network.wifi": CheckInfo(
+        "A criptografia da rede Wi-Fi em que este computador está: aberta, WEP, WPA, WPA2 ou WPA3.",
+        "Wi-Fi fraco deixa qualquer vizinho entrar na rede, e a partir daí todos os outros testes importam."),
+    "network.ipv6": CheckInfo(
+        "Aparelhos com endereço IPv6 público e portas que também respondem pelo IPv6.",
+        "No IPv6 não há NAT: se o firewall IPv6 do roteador estiver desligado, essas portas ficam "
+        "expostas à internet."),
+    "network.dns": CheckInfo(
+        "Se o DNS do roteador e do computador respondem a verdade (só com Verificações externas).",
+        "Roteador invadido troca o DNS para mandar você a sites falsos de banco, mesmo digitando o "
+        "endereço certo."),
+    "network.external": CheckInfo(
+        "O que a internet vê do seu IP público, segundo o Shodan (só com Verificações externas).",
+        "É a visão do atacante: portas que qualquer um alcança de fora, sem precisar estar na sua rede."),
 }
 
 

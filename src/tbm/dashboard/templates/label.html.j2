@@ -1,9 +1,9 @@
 <section class="card">
   <div class="row" style="margin-bottom:6px">
-    <h2 style="margin:0">Linha do tempo · {{ label }}</h2><span class="spacer"></span>
-    <span class="hint">pontos cheios = algo mudou · passe o mouse ou use Tab para detalhes</span>
+    <h2 style="margin:0">{{ _("Linha do tempo") }} · {{ label }}</h2><span class="spacer"></span>
+    <span class="hint">{{ _("pontos cheios = algo mudou · passe o mouse ou use Tab para detalhes") }}</span>
   </div>
-  <svg class="chart" viewBox="0 0 {{ t.w }} {{ t.h }}" role="img" aria-label="Evolução da nota de {{ label }}">
+  <svg class="chart" viewBox="0 0 {{ t.w }} {{ t.h }}" role="img" aria-label="{{ _("Evolução da nota de {l}", l=label) }}">
     <rect x="{{ t.left }}" y="{{ t.band_good.y }}" width="{{ t.right - t.left }}" height="{{ t.band_good.h }}" class="band-good"/>
     <rect x="{{ t.left }}" y="{{ t.band_bad.y }}" width="{{ t.right - t.left }}" height="{{ t.band_bad.h }}" class="band-bad"/>
     {% for g in t.grid %}
@@ -13,7 +13,7 @@
     {% if t.area %}<path d="{{ t.area }}" class="area"/>{% endif %}
     {% if t.path %}<path d="{{ t.path }}" class="line"/>{% endif %}
     {% for p in t.points %}
-    <a href="/scan/{{ p.id }}" aria-label="{{ p.label }}: abrir relatório">
+    <a href="/scan/{{ p.id }}" aria-label="{{ p.label }}: {{ _("abrir relatório") }}">
       <circle cx="{{ p.x }}" cy="{{ p.y }}" r="{{ 6 if p.event else 4.5 }}" class="pt{% if p.event %} event{% endif %}"
               data-tip="{{ p.tip }}" tabindex="0"/>
     </a>
@@ -22,10 +22,10 @@
   </svg>
 </section>
 <section class="card">
-  <h2>Scans</h2>
+  <h2>{{ _("Scans") }}</h2>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>Quando</th><th>Nota</th><th>Dispositivos</th><th>Abertos (crit/alto/méd/baixo)</th><th><span class="sr">Ações</span></th></tr></thead>
+    <thead><tr><th>{{ _("Quando") }}</th><th>{{ _("Nota") }}</th><th>{{ _("Dispositivos") }}</th><th>{{ _("Abertos (crit/alto/méd/baixo)") }}</th><th><span class="sr">{{ _("Ações") }}</span></th></tr></thead>
     <tbody>
     {% for r in rows %}
       <tr>
@@ -35,8 +35,8 @@
         <td><span style="color:var(--critical)">{{ r.critical or 0 }}</span> / <span style="color:var(--high)">{{ r.high or 0 }}</span> /
             <span style="color:var(--medium)">{{ r.medium or 0 }}</span> / <span style="color:var(--low)">{{ r.low or 0 }}</span></td>
         <td class="row">
-          <a class="btn sm subtle" href="/scan/{{ r.scan_id }}">relatório</a>
-          <button class="btn sm ghost" data-get="/partials/diff/{{ r.scan_id }}" data-target="#diff-{{ r.scan_id }}">o que mudou?</button>
+          <a class="btn sm subtle" href="/scan/{{ r.scan_id }}">{{ _("relatório") }}</a>
+          <button class="btn sm ghost" data-get="/partials/diff/{{ r.scan_id }}" data-target="#diff-{{ r.scan_id }}">{{ _("o que mudou?") }}</button>
         </td>
       </tr>
       <tr><td colspan="5" id="diff-{{ r.scan_id }}" style="border:0;padding:0"></td></tr>

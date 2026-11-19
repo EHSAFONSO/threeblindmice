@@ -1,58 +1,58 @@
 {% extends "base.html.j2" %}
-{% block title %}Achados · {{ label }}{% endblock %}
+{% block title %}{{ _("Achados") }} · {{ label }}{% endblock %}
 {% macro finding(f) %}
 <details class="finding" style="border-top:1px solid var(--line);padding:9px 0">
   <summary class="row" style="cursor:pointer">
     <span class="badge sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
     <span style="flex:1;{% if f.accepted or f.fingerprint in pending %}color:var(--muted){% endif %}">{{ f.title }}</span>
-    {% if f.accepted or f.fingerprint in pending %}<span class="badge sev-info">aceito</span>{% endif %}
+    {% if f.accepted or f.fingerprint in pending %}<span class="badge sev-info">{{ _("aceito") }}</span>{% endif %}
     <code class="hint">{{ f.location }}</code>
   </summary>
   <div style="padding:8px 0 4px">
-    {% if f.acceptance %}<p class="hint"><b>Aceitação:</b> {{ f.acceptance }}</p>
-    {% elif f.fingerprint in pending %}<p class="hint"><b>Risco aceito:</b> vale a partir do próximo scan.</p>{% endif %}
+    {% if f.acceptance %}<p class="hint"><b>{{ _("Aceitação:") }}</b> {{ f.acceptance }}</p>
+    {% elif f.fingerprint in pending %}<p class="hint"><b>{{ _("Risco aceito:") }}</b> {{ _("vale a partir do próximo scan.") }}</p>{% endif %}
     {% if f.description %}<p style="white-space:pre-line;margin:4px 0">{{ f.description }}</p>{% endif %}
-    {% if f.evidence %}<span class="hint"><b>Evidência</b></span><pre class="box">{{ f.evidence }}</pre>{% endif %}
-    {% if f.remediation %}<span class="hint"><b>Como corrigir</b></span><p style="margin:4px 0">{{ f.remediation }}</p>{% endif %}
+    {% if f.evidence %}<span class="hint"><b>{{ _("Evidência") }}</b></span><pre class="box">{{ f.evidence }}</pre>{% endif %}
+    {% if f.remediation %}<span class="hint"><b>{{ _("Como corrigir") }}</b></span><p style="margin:4px 0">{{ f.remediation }}</p>{% endif %}
     {% for ref in f.references %}<a href="{{ ref }}" target="_blank" rel="noopener noreferrer">{{ ref }}</a><br>{% endfor %}
     <div class="row" style="margin-top:8px">
       {% if f.accepted or f.fingerprint in pending %}
-        <button class="btn sm subtle" data-unaccept="{{ f.fingerprint }}">Desfazer aceitação</button>
+        <button class="btn sm subtle" data-unaccept="{{ f.fingerprint }}">{{ _("Desfazer aceitação") }}</button>
       {% else %}
-        <button class="btn sm subtle" data-open="{{ f.fingerprint }}">Aceitar risco…</button>
+        <button class="btn sm subtle" data-open="{{ f.fingerprint }}">{{ _("Aceitar risco…") }}</button>
       {% endif %}
       <span class="hint">id <code>{{ f.fingerprint[:8] }}</code></span>
     </div>
     <form class="row accept-form" id="form-{{ f.fingerprint }}" hidden style="margin-top:8px">
-      <label class="sr" for="r-{{ f.fingerprint }}">Motivo</label>
-      <input type="text" id="r-{{ f.fingerprint }}" placeholder="Motivo (ex.: modem da operadora, chamado aberto)" size="38" required>
-      <label class="hint">válido até <input type="date"></label>
-      <button class="btn sm" data-accept="{{ f.fingerprint }}">Aceitar</button>
+      <label class="sr" for="r-{{ f.fingerprint }}">{{ _("Motivo") }}</label>
+      <input type="text" id="r-{{ f.fingerprint }}" placeholder="{{ _("Motivo (ex.: modem da operadora, chamado aberto)") }}" size="38" required>
+      <label class="hint">{{ _("válido até") }} <input type="date"></label>
+      <button class="btn sm" data-accept="{{ f.fingerprint }}">{{ _("Aceitar") }}</button>
     </form>
   </div>
 </details>
 {% endmacro %}
 {% block content %}
 <div class="row" style="margin-bottom:6px">
-  <h1 style="font-size:22px">O que corrigir · {{ label }}</h1><span class="spacer"></span>
-  {% if labels | length > 1 %}<label class="hint">Histórico <select onchange="location.href='/findings/' + encodeURIComponent(this.value)">
+  <h1 style="font-size:22px">{{ _("O que corrigir") }} · {{ label }}</h1><span class="spacer"></span>
+  {% if labels | length > 1 %}<label class="hint">{{ _("Histórico") }} <select onchange="location.href='/findings/' + encodeURIComponent(this.value)">
     {% for l in labels %}<option{% if l == label %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></label>{% endif %}
 </div>
-<p class="hint">Último scan em {{ scan.started_at.astimezone().strftime("%d/%m/%Y %H:%M") }} · nota <b class="grade-{{ scan.grade }}">{{ scan.grade }}</b>
-  {{ scan.score }}/100. Os achados estão agrupados pela <b>correção</b>: uma ação costuma resolver vários de uma vez.
-  As primeiras são as que mais reduzem risco real (CISA KEV e EPSS).</p>
+<p class="hint">{{ _("Último scan em {t}", t=scan.started_at.astimezone().strftime("%d/%m/%Y %H:%M")) }} · {{ _("nota") }} <b class="grade-{{ scan.grade }}">{{ scan.grade }}</b>
+  {{ scan.score }}/100. {{ _("Os achados estão agrupados pela correção: uma ação costuma resolver vários de uma vez.") }}
+  {{ _("As primeiras são as que mais reduzem risco real (CISA KEV e EPSS).") }}</p>
 
 <div class="card" style="margin:14px 0">
-  <div class="row hint" style="margin-bottom:6px"><b style="color:var(--text)">Progresso</b><span class="spacer"></span>
-    {{ progress.resolved }} de {{ progress.total }} problemas já resolvidos ({{ progress.percent }}%)</div>
-  <div class="progress" role="progressbar" aria-valuenow="{{ progress.percent }}" aria-valuemin="0" aria-valuemax="100" aria-label="Progresso">
+  <div class="row hint" style="margin-bottom:6px"><b style="color:var(--text)">{{ _("Progresso") }}</b><span class="spacer"></span>
+    {{ _("{a} de {b} problemas já resolvidos ({p}%)", a=progress.resolved, b=progress.total, p=progress.percent) }}</div>
+  <div class="progress" role="progressbar" aria-valuenow="{{ progress.percent }}" aria-valuemin="0" aria-valuemax="100" aria-label="{{ _("Progresso") }}">
     <div style="width:{{ progress.percent }}%"></div></div>
 </div>
 
 <div class="row" style="margin-bottom:10px">
-  <label class="hint" for="f-min">Mostrar a partir de</label>
+  <label class="hint" for="f-min">{{ _("Mostrar a partir de") }}</label>
   <select id="f-min">
-    {% for v, name in [("4", "crítico"), ("3", "alto"), ("2", "médio"), ("1", "baixo")] %}<option value="{{ v }}"{% if v == "1" %} selected{% endif %}>{{ name }}</option>{% endfor %}
+    {% for v, name in [("4", "crítico"), ("3", "alto"), ("2", "médio"), ("1", "baixo")] %}<option value="{{ v }}"{% if v == "1" %} selected{% endif %}>{{ _(name) }}</option>{% endfor %}
   </select>
   <span class="hint" id="f-count" aria-live="polite"></span>
 </div>
@@ -62,30 +62,34 @@
   <div class="row" style="align-items:flex-start">
     <span class="device-icon {{ a.severity.value }}"><svg class="icon lg" aria-hidden="true"><use href="#i-{{ device_icon(a.device_type) }}"/></svg></span>
     <div style="flex:1;min-width:220px">
-      <h2 style="margin:0 0 4px;font-size:17px">{{ a.title }}</h2>
-      <div class="hint">{{ a.why }}</div>
+      <h2 style="margin:0 0 4px;font-size:17px">{{ action_title(a) }}</h2>
+      <div class="hint">{{ _(a.why) }}</div>
       <div class="row" style="margin-top:8px">
         <span class="badge sev-{{ a.severity.value }}">{{ a.severity.value }}</span>
-        <span class="hint">resolve <b>{{ a.findings | length }}</b> achado(s)</span>
-        {% if a.kev %}<span class="badge sev-critical">explorada ativamente (CISA KEV)</span>
+        <span class="hint">{{ _("resolve {n} achado(s)", n=a.findings | length) }}</span>
+        {% if a.kev %}<span class="badge sev-critical">{{ _("explorada ativamente (CISA KEV)") }}</span>
         {% elif a.max_epss and a.max_epss >= 0.1 %}<span class="badge sev-high">EPSS {{ "%.0f" | format(a.max_epss * 100) }}%</span>{% endif %}
       </div>
     </div>
-    {% if a.letter_url(label) %}<a class="btn sm ghost" href="{{ a.letter_url(label) }}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>Carta para o provedor</a>{% endif %}
+    {% if a.letter_url(label) %}<a class="btn sm ghost" href="{{ a.letter_url(label) }}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>{{ _("Carta para o provedor") }}</a>{% endif %}
   </div>
+{% set g = action_guide(a, scan) %}{% if g %}
+  <details class="guide"><summary><svg class="icon" aria-hidden="true"><use href="#i-tool"/></svg>{% if g.brand %}{{ _("Como fazer no seu {b}", b=g.brand) }}{% else %}{{ _("Como fazer") }}{% endif %}</summary>
+    <ol>{% for s in g.steps %}<li>{{ s }}</li>{% endfor %}</ol>
+  </details>{% endif %}
   <div style="margin-top:12px">{% for f in a.findings %}{{ finding(f) }}{% endfor %}</div>
 </article>
 {% else %}
-<div class="card empty"><svg class="icon xl" aria-hidden="true"><use href="#i-shield-check"/></svg><p>Nada a corrigir neste scan. 🎉</p></div>
+<div class="card empty"><svg class="icon xl" aria-hidden="true"><use href="#i-shield-check"/></svg><p>{{ _("Nada a corrigir neste scan.") }} 🎉</p></div>
 {% endfor %}
 
 {% if accepted %}
-<h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>Riscos aceitos ({{ accepted | length }})</h2>
+<h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>{{ _("Riscos aceitos") }} ({{ accepted | length }})</h2>
 <div class="card">{% for f in accepted %}{{ finding(f) }}{% endfor %}</div>
 {% endif %}
 {% if info %}
-<h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>Informativos ({{ info | length }})</h2>
-<div class="card"><p class="hint" style="margin-top:0">Não são problemas: só registram o que foi observado.</p>{% for f in info %}{{ finding(f) }}{% endfor %}</div>
+<h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>{{ _("Informativos") }} ({{ info | length }})</h2>
+<div class="card"><p class="hint" style="margin-top:0">{{ _("Não são problemas: só registram o que foi observado.") }}</p>{% for f in info %}{{ finding(f) }}{% endfor %}</div>
 {% endif %}
 
 <script>
@@ -96,7 +100,7 @@ if (fromUrl) minSel.value = fromUrl;
 function applyFilter() {
   let n = 0;
   document.querySelectorAll(".action-card").forEach(c => { const show = +c.dataset.rank >= +minSel.value; c.hidden = !show; if (show) n++; });
-  document.getElementById("f-count").textContent = n + " ação(ões) exibida(s)";
+  document.getElementById("f-count").textContent = {{ _("{n} ação(ões) exibida(s)") | tojson }}.replace("{n}", n);
 }
 minSel.addEventListener("change", applyFilter); applyFilter();
 if (location.hash) { const t = document.querySelector(location.hash); if (t) { t.querySelectorAll("details")[0]?.setAttribute("open", ""); } }
@@ -110,12 +114,12 @@ document.addEventListener("click", async (e) => {
     const form = document.getElementById("form-" + acc.dataset.accept);
     const [reason, until] = form.querySelectorAll("input");
     try { await tbmPost("/api/accept", {fingerprint: acc.dataset.accept, label, reason: reason.value, until: until.value || null});
-          tbmToast("Risco aceito. Sai da nota no próximo scan.", "ok"); setTimeout(() => location.reload(), 900); }
+          tbmToast({{ _("Risco aceito. Sai da nota no próximo scan.") | tojson }}, "ok"); setTimeout(() => location.reload(), 900); }
     catch (err) { tbmToast(err.message, "error"); }
     return;
   }
   const un = e.target.closest("[data-unaccept]");
-  if (un && await tbmConfirm("Desfazer a aceitação?", "O achado volta a contar na nota a partir do próximo scan.", "Desfazer")) {
+  if (un && await tbmConfirm({{ _("Desfazer a aceitação?") | tojson }}, {{ _("O achado volta a contar na nota a partir do próximo scan.") | tojson }}, {{ _("Desfazer") | tojson }})) {
     try { await tbmPost("/api/unaccept", {fingerprint: un.dataset.unaccept}); location.reload(); }
     catch (err) { tbmToast(err.message, "error"); }
   }

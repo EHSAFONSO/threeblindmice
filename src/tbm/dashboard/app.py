@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from tbm import __version__
+from tbm import __version__, i18n
 from tbm.dashboard.charts import sparkline
 from tbm.dashboard.icons import device_icon
 from tbm.dashboard.views import device_detail, health, network_map, timeline, worst
@@ -36,6 +36,37 @@ _env = Environment(
 )
 _env.filters["port"] = port_label
 _env.globals["device_icon"] = device_icon
+_env.globals["_"] = i18n.gettext
+_env.globals["html_lang"] = i18n.html_lang
+_env.globals["get_lang"] = i18n.get_lang
+_env.globals["js_i18n"] = i18n.js_catalog
+_env.globals["LANGS"] = i18n.LANGS
+_env.filters["dtype"] = i18n.device_type
+
+
+def action_guide(action, scan):
+    """Passo a passo da correção no modelo do roteador (ou None)."""
+    from tbm.squeak.guides import guide_for
+
+    return guide_for(action.kind, scan.host(action.host), scan.gateway)
+
+
+_env.globals["action_guide"] = action_guide
+
+
+def action_title(action) -> str:
+    """Título da ação no idioma da interface (o modelo do tipo é traduzido, o aparelho não)."""
+    from tbm.squeak.actions import KINDS
+
+    device = action.device
+    if action.device_type and action.device_type in device:
+        device = device.replace(action.device_type, i18n.device_type(action.device_type) or action.device_type)
+    if action.kind in KINDS:
+        return i18n.gettext(KINDS[action.kind].title).replace("{dev}", device)
+    return action.title
+
+
+_env.globals["action_title"] = action_title
 
 
 def _when(iso: str) -> str:
@@ -88,6 +119,40 @@ def create_app(store: HistoryStore, gui: GuiSettings | None = None,
     app = FastAPI(title="threeblindmice", version=__version__, docs_url=None, redoc_url=None,
                   openapi_url=None)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+
+    class LanguageMiddleware:
+        """Escolhe o idioma da requisição: cookie tbm-lang, senão o Accept-Language do navegador."""
+
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                return await self.inner(scope, receive, send)
+            headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+            cookies = {}
+            for part in headers.get("cookie", "").split(";"):
+                k, _, v = part.strip().partition("=")
+                cookies[k] = v
+            lang = i18n.normalize(cookies.get(i18n.COOKIE)) or i18n.from_accept_language(headers.get("accept-language"))
+            with i18n.use(lang):
+                await self.inner(scope, receive, send)
+
+    app.add_middleware(LanguageMiddleware)
+
+    @app.get("/lang/{code}")
+    def set_language(code: str, request: Request) -> RedirectResponse:
+        from urllib.parse import urlparse
+
+        lang = i18n.normalize(code) or i18n.DEFAULT
+        # volta para a página de onde veio (só o caminho: nunca redireciona para outro site)
+        ref = urlparse(request.headers.get("referer", ""))
+        target = ref.path if ref.path.startswith("/") and not ref.path.startswith("//") else "/"
+        if ref.query:
+            target += "?" + ref.query
+        resp = RedirectResponse(target, status_code=303)
+        resp.set_cookie(i18n.COOKIE, lang, max_age=365 * 86400, samesite="strict", httponly=False)
+        return resp
 
     def render(name: str, **ctx) -> HTMLResponse:
         nav = [r["label"] for r in store.labels()]

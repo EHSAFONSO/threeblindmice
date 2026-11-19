@@ -45,8 +45,13 @@ def build_message(result: ScanResult, diff: ScanDiff, items: list[Finding]) -> s
         lines += [f"• [{f.severity.value.upper()}] {f.title} ({f.location})" for f in items[:15]]
         if len(items) > 15:
             lines.append(f"… e mais {len(items) - 15}")
-    if diff.alert_hosts:
-        lines.append("Dispositivos novos na rede: " + ", ".join(h.display for h in diff.alert_hosts[:10]))
+    unknown = [h for h in diff.alert_hosts if not h.trusted]
+    known = [h for h in diff.alert_hosts if h.trusted]
+    if unknown:
+        lines.append("⚠ Aparelho DESCONHECIDO na rede: " + ", ".join(h.display for h in unknown[:10]))
+        lines.append("  (se for seu, aprove em Dispositivos para não alertar de novo)")
+    if known:
+        lines.append("Voltaram à rede (aprovados): " + ", ".join(h.display for h in known[:10]))
     if diff.alert_ports:
         lines.append("Portas novas: " + ", ".join(port_label(p) for p in diff.alert_ports[:10]))
     for ip, old_mac, new_mac in diff.mac_changes[:5]:
@@ -71,7 +76,25 @@ def _highest(items: list[Finding]) -> Severity | None:
 
 
 def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> Delivery:
-    text = build_message(result, diff, items)
+    top = _highest(items)
+    priority = {Severity.CRITICAL: "urgent", Severity.HIGH: "high"}.get(top, "default") if top else "low"
+    generic = {
+        "scan_id": result.scan_id,
+        "label": result.label,
+        "score": result.score,
+        "grade": result.grade,
+        "new_findings": [f.model_dump(mode="json") for f in items],
+        "new_hosts": [h.model_dump(mode="json", exclude={"services"}) for h in diff.alert_hosts],
+        "opened_ports": [port_label(p) for p in diff.alert_ports],
+        "mac_changes": [{"ip": ip, "old": o, "new": n} for ip, o, n in diff.mac_changes],
+    }
+    return text_delivery(target, build_message(result, diff, items),
+                         title=f"threeblindmice: {result.label} ({result.grade})", priority=priority, extra=generic)
+
+
+def text_delivery(target: str, text: str, *, title: str = "threeblindmice", priority: str = "default",
+                  extra: dict[str, Any] | None = None) -> Delivery:
+    """Uma mensagem de texto para qualquer destino suportado (alertas e o resumo semanal)."""
     parsed = urlparse(target)
     host = parsed.hostname or ""
 
@@ -97,10 +120,8 @@ def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[
     if parsed.scheme == "ntfy" or host == "ntfy.sh":
         topic = (parsed.netloc + parsed.path).strip("/") if parsed.scheme == "ntfy" else parsed.path.strip("/")
         base = "https://ntfy.sh" if parsed.scheme == "ntfy" else f"{parsed.scheme}://{parsed.netloc}"
-        top = _highest(items)
-        priority = {Severity.CRITICAL: "urgent", Severity.HIGH: "high"}.get(top, "default") if top else "low"
         return Delivery(f"{base}/{topic}", content=text.encode(), headers={
-            "Title": f"threeblindmice: {result.label} ({result.grade})",
+            "Title": title,
             "Priority": priority,
             "Tags": "mouse,shield",
         })
@@ -109,17 +130,15 @@ def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[
         return Delivery(target, json={"content": text[:1990], "username": "threeblindmice"})
     if host.endswith("slack.com"):
         return Delivery(target, json={"text": text})
-    return Delivery(target, json={
-        "text": text,
-        "scan_id": result.scan_id,
-        "label": result.label,
-        "score": result.score,
-        "grade": result.grade,
-        "new_findings": [f.model_dump(mode="json") for f in items],
-        "new_hosts": [h.model_dump(mode="json", exclude={"services"}) for h in diff.alert_hosts],
-        "opened_ports": [port_label(p) for p in diff.alert_ports],
-        "mac_changes": [{"ip": ip, "old": o, "new": n} for ip, o, n in diff.mac_changes],
-    })
+    return Delivery(target, json={"text": text, **(extra or {})})
+
+
+async def send_text(target: str, text: str, *, title: str = "threeblindmice",
+                    transport: httpx.AsyncBaseTransport | None = None) -> None:
+    d = text_delivery(target, text, title=title)
+    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT}, transport=transport) as client:
+        resp = await client.post(d.url, json=d.json, content=d.content, headers=d.headers)
+        resp.raise_for_status()
 
 
 def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> dict:

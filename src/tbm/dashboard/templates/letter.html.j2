@@ -1,6 +1,7 @@
 {% extends "base.html.j2" %}
 {% block title %}Carta para o provedor · threeblindmice{% endblock %}
 {% block content %}
+{% if get_lang() == "en" %}<div class="banner" style="margin-bottom:14px" role="note">This page is only available in Portuguese for now.</div>{% endif %}
 <style>
   label.field { display: block; font-weight: 600; margin: 12px 0 4px; }
   textarea { width: 100%; min-height: 420px; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }

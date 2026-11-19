@@ -131,9 +131,10 @@ def _run(coro):
 
 def _sniffer_options(active: bool, no_cve: bool, secrets: Path | None, disable: list[str],
                      max_cves: int, scope: Scope, no_epss: bool = False,
-                     no_backport: bool = False) -> SnifferOptions:
+                     no_backport: bool = False, external: bool = False) -> SnifferOptions:
     return SnifferOptions(
         active=active,
+        external=external,
         cve=not no_cve,
         epss=not no_epss,
         backport=not no_backport,
@@ -265,7 +266,8 @@ def _exit_code(findings: list[Finding], fail_on: Severity | None) -> int:
     return 0
 
 
-async def _notify(webhook: str | None, result: ScanResult, diff: ScanDiff, min_severity: Severity) -> None:
+async def _notify(webhook: str | None, result: ScanResult, diff: ScanDiff, min_severity: Severity,
+                  store: HistoryStore | None = None) -> None:
     if not webhook:
         return
     try:
@@ -273,6 +275,14 @@ async def _notify(webhook: str | None, result: ScanResult, diff: ScanDiff, min_s
         console.print("Alerta enviado." if sent else "[dim]Nada novo para alertar.[/]")
     except Exception as exc:  # noqa: BLE001
         err.print(f"[yellow]falha ao enviar webhook: {exc}[/]")
+    if store is not None:
+        from tbm.squeak import summary
+
+        try:
+            if await summary.maybe_send(store, result.label, webhook):
+                console.print("Resumo semanal enviado.")
+        except Exception as exc:  # noqa: BLE001 (o resumo nunca derruba o scan)
+            err.print(f"[yellow]falha ao enviar o resumo semanal: {exc}[/]")
 
 
 # ───────────────────────────── opções comuns ─────────────────────────────
@@ -290,6 +300,7 @@ ActiveOpt = Annotated[bool, typer.Option("--active", help="Checks ativos: FTP an
 NoCveOpt = Annotated[bool, typer.Option("--no-cve", help="Não consulta o NVD.")]
 NoEpssOpt = Annotated[bool, typer.Option("--no-epss", help="Não consulta o EPSS (FIRST.org).")]
 NoBackportOpt = Annotated[bool, typer.Option("--no-backport", help="Não consulta o tracker da distro.")]
+ExternalOpt = Annotated[bool, typer.Option("--external", help="Verificações externas: o que a internet vê do seu IP (Shodan InternetDB) e DNS sequestrado. Envia o seu IP público para esses serviços.")]
 SecretsOpt = Annotated[Path | None, typer.Option("--secrets", help="Também procura segredos neste diretório.", exists=True)]
 DisableOpt = Annotated[list[str], typer.Option("--disable", "-x", help="Desativa um check ou grupo (ex.: http, cve.nvd).")]
 MaxCvesOpt = Annotated[int, typer.Option(help="Máximo de CVEs por serviço.")]
@@ -321,6 +332,7 @@ def scan(
     no_cve: NoCveOpt = False,
     no_epss: NoEpssOpt = False,
     no_backport: NoBackportOpt = False,
+    external: ExternalOpt = False,
     secrets: SecretsOpt = None,
     disable: DisableOpt = [],  # noqa: B006 (typer exige lista literal)
     max_cves: MaxCvesOpt = 15,
@@ -343,7 +355,8 @@ def scan(
         specs=targets, scope=sc, label=label, save=not no_save, no_evidence=no_evidence,
         scout_options=_scout_options(ports, timeout, concurrency, no_discovery, udp, no_mac,
                                      gentle, rate, no_ping, no_multicast),
-        sniffer_options=_sniffer_options(active, no_cve, secrets, disable, max_cves, sc, no_epss, no_backport),
+        sniffer_options=_sniffer_options(active, no_cve, secrets, disable, max_cves, sc, no_epss, no_backport,
+                                         external),
     )
     console.print(f"[dim]Escopo: {sc.source} · {len(job.scout_options.ports)} porta(s) TCP"
                   f"{' + UDP' if udp else ''} · checks ativos: {'sim' if active else 'não'}"
@@ -360,7 +373,7 @@ def scan(
     out = report or Path("reports") / f"tbm-{label}-{result.started_at:%Y%m%d-%H%M%S}.html"
     write_report(result, out, diff)
     console.print(f"Relatório: [link=file://{out.resolve()}]{out}[/]  ·  scan_id [cyan]{result.scan_id}[/]")
-    _run(_notify(notify or notify_target()[0], result, diff, min_severity))
+    _run(_notify(notify or notify_target()[0], result, diff, min_severity, store))
     raise typer.Exit(_exit_code(result.findings, fail_on))
 
 
@@ -374,6 +387,7 @@ def watch(
     udp: UdpOpt = False,
     active: ActiveOpt = False,
     no_cve: NoCveOpt = False,
+    external: ExternalOpt = False,
     notify: NotifyOpt = None,
     min_severity: MinSevOpt = Severity.MEDIUM,
     no_evidence: NoEvidenceOpt = False,
@@ -391,7 +405,7 @@ def watch(
     job = ScanJob(
         specs=targets, scope=sc, label=label, no_evidence=no_evidence,
         scout_options=_scout_options(ports, 1.0, 400, False, udp, gentle=gentle),
-        sniffer_options=_sniffer_options(active, no_cve, None, [], 15, sc),
+        sniffer_options=_sniffer_options(active, no_cve, None, [], 15, sc, external=external),
     )
     store = HistoryStore()
     console.print(BANNER.format(v=__version__))
@@ -866,6 +880,59 @@ def desktop_app(
     if smoke:
         console.print(runner.smoke_result)
     raise typer.Exit(code)
+
+
+@app.command("update")
+def update_cmd(
+    disable: Annotated[bool, typer.Option("--disable", help="Desliga o aviso de nova versão.")] = False,
+    enable: Annotated[bool, typer.Option("--enable", help="Liga o aviso de nova versão.")] = False,
+) -> None:
+    """Confere se há versão nova no GitHub (só avisa; não baixa nem instala nada)."""
+    from tbm import update
+
+    if disable or enable:
+        update.set_enabled(enable)
+        console.print(f"Aviso de nova versão {'ligado' if enable else 'desligado'}.")
+        return
+    release = _run(update.check(force=True))
+    if release is None:
+        console.print(f"Você está na versão mais recente ({__version__}).")
+        return
+    console.print(f"[bold]Nova versão: {release.version}[/] (você tem {__version__})")
+    console.print(release.url)
+    if release.sha256:
+        console.print(f"SHA-256 de {release.setup_name}: [cyan]{release.sha256}[/]")
+        console.print(f"Para provar a origem: [cyan]{release.verify_command}[/]")
+
+
+@app.command("summary")
+def summary_cmd(
+    label: LabelOpt = "default",
+    send: Annotated[bool, typer.Option("--send", help="Envia agora pelo destino dos alertas.")] = False,
+    disable: Annotated[bool, typer.Option("--disable", help="Desliga o resumo semanal automático.")] = False,
+    enable: Annotated[bool, typer.Option("--enable", help="Liga o resumo semanal automático.")] = False,
+) -> None:
+    """Resumo da semana: nota, o que mudou e a próxima ação. Sai sozinho 1x por semana com o vigia."""
+    from tbm.squeak import summary
+
+    if disable or enable:
+        summary.set_enabled(enable)
+        console.print(f"Resumo semanal automático {'ligado' if enable else 'desligado'}.")
+        return
+    store = HistoryStore()
+    text = summary.build_summary(store, label)
+    if text is None:
+        raise _fail(f"nenhum scan com o rótulo '{label}'")
+    console.print(text)
+    if send:
+        target = notify_target()[0]
+        if not target:
+            raise _fail("nenhum destino de alertas configurado (tbm telegram-setup ou tbm gui → Alertas)")
+        from tbm.squeak.notify import send_text
+
+        _run(send_text(target, text, title=f"threeblindmice: resumo semanal ({label})"))
+        summary.mark_sent(store, label)
+        console.print("[green]Enviado.[/]")
 
 
 @app.command("uninstall-cleanup", hidden=True)

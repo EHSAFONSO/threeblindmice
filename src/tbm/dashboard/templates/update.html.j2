@@ -1,0 +1,15 @@
+<div class="banner" style="margin-bottom:16px" role="status">
+  <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>
+  <div style="flex:1">
+    <b>{{ _("Nova versão disponível: {v}", v=release.version) }}</b>
+    <div class="hint">{{ _("Baixe pela") }} <a href="{{ release.url }}" target="_blank" rel="noopener noreferrer">{{ _("página da release no GitHub") }}</a>.
+      {{ _("O tbm não baixa nem instala nada sozinho.") }}</div>
+    {% if release.sha256 %}<details style="margin-top:6px"><summary class="hint">{{ _("Como conferir o arquivo baixado") }}</summary>
+      <div class="hint" style="margin-top:6px">{{ _("SHA-256 publicado para") }} <code>{{ release.setup_name }}</code>:</div>
+      <code class="mono" style="word-break:break-all">{{ release.sha256 }}</code>
+      <div class="hint" style="margin-top:6px">{{ _("Compare com") }} <code>certutil -hashfile {{ release.setup_name }} SHA256</code>.
+        {{ _("Para provar que saiu do CI deste repositório:") }} <code>{{ release.verify_command }}</code></div>
+    </details>{% endif %}
+  </div>
+  <button class="btn sm subtle" type="button" onclick="tbmPost('/api/update/disable').then(() => document.getElementById('update-slot').remove())">{{ _("Não verificar mais") }}</button>
+</div>

@@ -1,0 +1,49 @@
+# Toda segunda: regenera os locks com as versões mais novas que já têm 3 dias,
+# confere vulnerabilidades conhecidas e propõe a mudança num branch.
+# Nada entra no main sem revisão: o resultado é um pull request (ou, se o
+# repositório não permite que Actions abram PRs, um link no resumo do job).
+name: Atualiza locks
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # publicar o branch deps/lock-refresh
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: ./.github/actions/install
+        with:
+          python-version: "3.12"
+          lock: dev
+      - name: Regenera os locks (só versões com 3+ dias)
+        run: python requirements/lock.py --upgrade
+      - name: Vulnerabilidades conhecidas
+        run: pip-audit -r requirements/desktop.txt --no-deps --disable-pip --progress-spinner off
+      - name: Propõe a mudança
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- requirements; then echo "Locks já atualizados." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          branch=deps/lock-refresh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git commit -am "Atualiza os locks de dependências (versões com 3+ dias)"
+          git push --force origin "$branch"
+          body="Gerado por python requirements/lock.py --upgrade. Revise o diff dos requirements/*.txt antes de aceitar."
+          if gh pr create --head "$branch" --title "Atualiza os locks de dependências" --body "$body" 2>pr.err \
+             || gh pr view "$branch" >/dev/null 2>&1; then
+            echo "PR aberto/atualizado para $branch." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Não foi possível abrir o PR ($(cat pr.err))." >> "$GITHUB_STEP_SUMMARY"
+            echo "Abra manualmente: ${{ github.server_url }}/${{ github.repository }}/compare/$branch?expand=1" >> "$GITHUB_STEP_SUMMARY"
+          fi

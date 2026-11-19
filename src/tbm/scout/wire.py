@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 # ───────────────────────────── DNS (RFC 1035) ─────────────────────────────
 
-TYPE_A, TYPE_PTR = 1, 12
+TYPE_A, TYPE_PTR, TYPE_AAAA = 1, 12, 28
 CLASS_IN = 1
 
 
@@ -125,6 +125,16 @@ class DNSResponse:
         """nome → IPv4, de todas as seções."""
         return {r.name: ".".join(str(b) for b in r.data) for r in self.records
                 if r.rtype == TYPE_A and len(r.data) == 4}
+
+    def aaaa_records(self) -> dict[str, set[str]]:
+        """nome → IPv6 (um aparelho costuma anunciar vários), de todas as seções."""
+        import ipaddress
+
+        out: dict[str, set[str]] = {}
+        for r in self.records:
+            if r.rtype == TYPE_AAAA and len(r.data) == 16:
+                out.setdefault(r.name, set()).add(str(ipaddress.IPv6Address(r.data)))
+        return out
 
 
 def _parse_records(data: bytes, offset: int, count: int) -> tuple[list[DNSRecord], int]:

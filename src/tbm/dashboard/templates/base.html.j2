@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="{{ html_lang() }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,35 +8,39 @@
 try { var t = localStorage.getItem("tbm-theme"); if (t && t !== "auto") document.documentElement.setAttribute("data-theme", t); } catch (e) {}</script>
 <link rel="stylesheet" href="/static/tbm.css?v={{ version }}">
 {% if gui %}<meta name="tbm-token" content="{{ csrf_token }}">{% endif %}
+<script>window.TBM_I18N = {{ js_i18n() | tojson }};</script>
 <script src="/static/tbm.js?v={{ version }}" defer></script>
 {% block head %}{% endblock %}
 </head>
 <body>
-<a class="skip" href="#main">Pular para o conteúdo</a>
+<a class="skip" href="#main">{{ _("Pular para o conteúdo") }}</a>
 {% include "_icons.svg.j2" %}
 <div class="shell">
   <header class="topbar">
-    <a class="brand" href="/" aria-label="threeblindmice, página inicial">
+    <a class="brand" href="/" aria-label="{{ _("threeblindmice, página inicial") }}">
       <svg viewBox="0 0 256 256" aria-hidden="true"><use href="#i-logo"/></svg>
-      <span>threeblindmice<small>{{ "Interface local" if gui else "Dashboard somente leitura" }} · v{{ version }}</small></span>
+      <span>threeblindmice<small>{{ _("Interface local") if gui else _("Dashboard somente leitura") }} · v{{ version }}</small></span>
     </a>
     {% if gui %}
-    <nav class="nav gui" aria-label="Principal">
+    <nav class="nav gui" aria-label="{{ _("Principal") }}">
       {% for href, icon, text in [("/", "gauge", "Visão geral"), ("/findings", "list", "Achados"), ("/map", "map", "Mapa"),
                                   ("/inventory", "grid", "Dispositivos"), ("/alerts", "bell", "Alertas"),
                                   ("/watch", "eye", "Vigia"), ("/features", "book", "Funcionalidades")] %}
-      <a href="{{ href }}" data-nav="{{ href }}"><svg class="icon" aria-hidden="true"><use href="#i-{{ icon }}"/></svg>{{ text }}</a>
+      <a href="{{ href }}" data-nav="{{ href }}"><svg class="icon" aria-hidden="true"><use href="#i-{{ icon }}"/></svg>{{ _(text) }}</a>
       {% endfor %}
     </nav>
-    <a class="btn sm no-print" href="/scan"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>Novo scan</a>
+    <a class="btn sm no-print" href="/scan"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>{{ _("Novo scan") }}</a>
     {% else %}
-    <nav class="nav" aria-label="Principal">
-      <a href="/" data-nav="/">Visão geral</a>
-      {% for l in nav_labels %}<a href="/inventory/{{ l | urlencode }}" data-nav="/inventory/{{ l | urlencode }}">Dispositivos · {{ l }}</a>{% endfor %}
+    <nav class="nav" aria-label="{{ _("Principal") }}">
+      <a href="/" data-nav="/">{{ _("Visão geral") }}</a>
+      {% for l in nav_labels %}<a href="/inventory/{{ l | urlencode }}" data-nav="/inventory/{{ l | urlencode }}">{{ _("Dispositivos") }} · {{ l }}</a>{% endfor %}
     </nav>
     {% endif %}
-    <button class="icon-btn no-print" type="button" onclick="tbmCycleTheme()" aria-label="Alternar tema: automático, claro ou escuro"
-            data-tip="Alternar tema (automático → claro → escuro)"><svg class="icon" aria-hidden="true"><use href="#i-contrast"/></svg></button>
+    <button class="icon-btn no-print" type="button" onclick="tbmCycleTheme()" aria-label="{{ _("Alternar tema: automático, claro ou escuro") }}"
+            data-tip="{{ _("Alternar tema (automático → claro → escuro)") }}"><svg class="icon" aria-hidden="true"><use href="#i-contrast"/></svg></button>
+    {% set other = "en" if get_lang() == "pt" else "pt" %}
+    <a class="icon-btn no-print lang-switch" href="/lang/{{ other }}" hreflang="{{ other }}"
+       aria-label="{{ LANGS[other] }}" data-tip="{{ LANGS[other] }}">{{ other | upper }}</a>
   </header>
   <script>
     document.querySelectorAll("[data-nav]").forEach(a => {
@@ -45,6 +49,7 @@ try { var t = localStorage.getItem("tbm-theme"); if (t && t !== "auto") document
     });
   </script>
   <main id="main" tabindex="-1">
+    {% if gui %}<div id="update-slot" data-get="/partials/update" data-trigger="load" aria-live="polite"></div>{% endif %}
     {% block content %}{% endblock %}
   </main>
 </div>

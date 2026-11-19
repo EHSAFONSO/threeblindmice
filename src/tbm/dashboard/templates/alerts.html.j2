@@ -1,6 +1,7 @@
 {% extends "base.html.j2" %}
 {% block title %}Alertas · threeblindmice{% endblock %}
 {% block content %}
+{% if get_lang() == "en" %}<div class="banner" style="margin-bottom:14px" role="note">This page is only available in Portuguese for now.</div>{% endif %}
 <style>
   .tabs { display: flex; gap: 6px; margin: 12px 0; flex-wrap: wrap; }
   .tabs button { font: inherit; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--line);
@@ -30,6 +31,9 @@
     {% endif %}
     <span id="current-msg" class="hint"></span>
   </div>
+  <label class="check" style="margin-top:14px"><input type="checkbox" id="weekly" {% if weekly %}checked{% endif %}>
+    <span><b>Resumo semanal</b><span class="hint">Uma vez por semana, depois de um scan, manda a nota, o que mudou e a
+      próxima ação, mesmo sem novidade. Assim você sabe que o vigia continua rodando.</span></span></label>
 </section>
 
 <section class="card">
@@ -138,6 +142,13 @@ $("hook-save").addEventListener("click", async () => {
   say($("hook-msg"), "Enviando…");
   try { saved(await tbmPost("/api/alerts/save", {kind: "url", url: $("hook-url").value}), $("hook-msg")); }
   catch (e) { say($("hook-msg"), e.message, false); }
+});
+
+// resumo semanal
+$("weekly").addEventListener("change", async e => {
+  try { await tbmPost("/api/alerts/summary", {enabled: e.target.checked});
+        tbmToast(e.target.checked ? "Resumo semanal ligado" : "Resumo semanal desligado", "ok"); }
+  catch (err) { e.target.checked = !e.target.checked; tbmToast(err.message, "error"); }
 });
 
 // destino atual

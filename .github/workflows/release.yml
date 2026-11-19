@@ -3,12 +3,21 @@
 #   2. confere que a tag bate com a versão do pyproject.toml
 #   3. publica no PyPI (trusted publishing, sem token guardado no repositório)
 #   4. publica a imagem Docker no GHCR
-#   5. gera o instalador do Windows (PyInstaller + Inno Setup)
+#   5. gera o instalador do Windows (PyInstaller + Inno Setup), assinado se o SignPath estiver configurado
 #   6. cria o GitHub Release com os artefatos
+#
+# Cada artefato (wheel, sdist, setup.exe, imagem) ganha um atestado de origem
+# (SLSA build provenance, assinado pelo Sigstore com a identidade deste
+# workflow) e uma lista de componentes (SBOM CycloneDX). Para conferir:
+#   gh attestation verify threeblindmice_0.8.0_x64-setup.exe --repo EHSAFONSO/threeblindmice
 #
 # Configuração única no PyPI (antes do primeiro release):
 #   pypi.org → Your projects → Publishing → Add a new pending publisher
 #   owner: EHSAFONSO · repo: threeblindmice · workflow: release.yml · environment: pypi
+#
+# Assinatura do setup.exe (opcional, grátis para código aberto em https://signpath.org):
+#   variáveis do repositório SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG, SIGNPATH_POLICY_SLUG
+#   e o segredo SIGNPATH_API_TOKEN. Sem eles, o instalador sai sem assinatura (como antes).
 name: Release
 
 on:
@@ -28,6 +37,10 @@ jobs:
   build:
     needs: ci
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # assinar os atestados (Sigstore)
+      attestations: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - uses: ./.github/actions/install
@@ -41,14 +54,36 @@ jobs:
           test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME ≠ versão v$version"; exit 1; }
       # sem isolamento: usa o hatchling travado em requirements/dev.txt
       - run: python -m build --no-isolation
+      - name: SBOM (dependências da instalação via pip)
+        run: |
+          mkdir -p sbom
+          cyclonedx-py requirements requirements/runtime.txt --of JSON -o sbom/threeblindmice-python.cdx.json
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3
+        with:
+          subject-path: dist/*
+      - uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34  # v3
+        with:
+          subject-path: dist/*.whl
+          sbom-path: sbom/threeblindmice-python.cdx.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: dist
           path: dist/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: sbom-python
+          path: sbom/
 
   windows-installer:
     needs: ci
     runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      actions: read  # o SignPath baixa o artefato não assinado
+    env:
+      HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - uses: ./.github/actions/install
@@ -60,10 +95,49 @@ jobs:
         run: |
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --version 6.7.3 -y --no-progress }
       - run: python packaging/windows/build.py
+      - name: Envia para assinatura
+        if: env.HAS_SIGNPATH == 'true'
+        id: unsigned
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: windows-installer-unsigned
+          path: dist/*-setup.exe
+      - name: Assina com SignPath
+        if: env.HAS_SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@ced31329c0317e779dad2eec2a7c3bb46ea1343e  # v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: dist
+      - name: SHA-256 (depois da assinatura, que muda o arquivo)
+        shell: pwsh
+        run: |
+          Get-ChildItem dist\*-setup.exe | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            [IO.File]::WriteAllText("$($_.FullName).sha256", "$h  $($_.Name)`n")
+          }
+      - name: SBOM (componentes empacotados no instalador)
+        shell: bash
+        run: |
+          mkdir -p sbom
+          cyclonedx-py requirements requirements/desktop.txt --of JSON -o sbom/threeblindmice-windows.cdx.json
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3
+        with:
+          subject-path: dist/*-setup.exe
+      - uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34  # v3
+        with:
+          subject-path: dist/*-setup.exe
+          sbom-path: sbom/threeblindmice-windows.cdx.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: windows-installer
-          path: dist/*-setup.exe*
+          path: |
+            dist/*-setup.exe*
+            sbom/
 
   pypi:
     # espera o instalador: assim PyPI e GitHub Release saem juntos ou nenhum sai
@@ -85,6 +159,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
@@ -100,12 +176,19 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+      - id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          sbom: true  # SBOM do BuildKit anexado à imagem
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
 
   github-release:
     needs: [pypi, docker, windows-installer]
@@ -120,15 +203,27 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: windows-installer
-          path: dist/
+          path: win/
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: sbom-python
+          path: sbom/
+      - run: cp win/dist/* dist/ && cp win/sbom/* sbom/ && ls -la dist sbom
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
-          files: dist/*
+          files: |
+            dist/*
+            sbom/*
           generate_release_notes: true
           body: |
             **Windows:** baixe o `threeblindmice_*_x64-setup.exe` abaixo e execute. Não precisa de Python.
-            O instalador ainda não tem assinatura digital: o Windows pode mostrar "O Windows protegeu o computador";
-            clique em *Mais informações* → *Executar assim mesmo*. Para conferir que o arquivo é o original,
-            compare o SHA-256 (`certutil -hashfile <arquivo> SHA256`) com o do `.sha256` desta página.
+            Se o Windows mostrar "O Windows protegeu o computador" (instalador ainda sem assinatura digital),
+            clique em *Mais informações* → *Executar assim mesmo*, depois de conferir o arquivo:
+
+            - SHA-256: `certutil -hashfile <arquivo> SHA256` e compare com o `.sha256` desta página;
+            - origem: `gh attestation verify <arquivo> --repo ${{ github.repository }}` prova que ele saiu
+              do CI deste repositório, a partir desta tag.
+
+            Os arquivos `*.cdx.json` listam todos os componentes (SBOM CycloneDX).
 
             **Python:** `pip install "threeblindmice[desktop]"`

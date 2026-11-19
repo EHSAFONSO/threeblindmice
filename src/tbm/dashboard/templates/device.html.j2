@@ -1,40 +1,45 @@
 <div class="row" style="align-items:flex-start">
   <span class="device-icon {{ sev }}"><svg class="icon lg" aria-hidden="true"><use href="#i-{{ icon }}"/></svg></span>
   <div style="flex:1">
-    <h2 style="margin:0 0 4px">{{ host.device_name or host.hostname or host.address }}</h2>
-    <div class="hint">{{ host.device_type or "tipo desconhecido" }}</div>
+    <h2 style="margin:0 0 4px">{{ host.name or host.address }}</h2>
+    <div class="hint">{{ host.device_type | dtype or _("tipo desconhecido") }}</div>
   </div>
-  <button class="icon-btn" type="button" onclick="tbmCloseDrawer()" aria-label="Fechar"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+  <button class="icon-btn" type="button" onclick="tbmCloseDrawer()" aria-label="{{ _("Fechar") }}"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
 </div>
 
 <table style="margin:16px 0">
   <tr><th>IP</th><td class="mono">{{ host.address }}</td></tr>
   {% if host.mac %}<tr><th>MAC</th><td class="mono">{{ host.mac }}{% if host.vendor %}<br><span class="hint">{{ host.vendor }}</span>{% endif %}</td></tr>{% endif %}
-  {% if first_seen %}<tr><th>Visto desde</th><td>{{ first_seen.astimezone().strftime("%d/%m/%Y") }}</td></tr>{% endif %}
-  {% if host.discovery.found_by %}<tr><th>Encontrado por</th><td>{{ host.discovery.found_by.replace(",", ", ") }}</td></tr>{% endif %}
-  <tr><th>Portas</th><td>{% for s in host.services %}<code>{{ s.port }}{% if s.transport == "udp" %}/udp{% endif %}</code>
-    <span class="hint">{{ s.label }}</span><br>{% else %}<span class="hint">nenhuma aberta</span>{% endfor %}</td></tr>
-  {% if host.discovery.mdns_services %}<tr><th>Anuncia</th><td class="hint">{{ host.discovery.mdns_services.replace(",", ", ") }}</td></tr>{% endif %}
+  {% if first_seen %}<tr><th>{{ _("Visto desde") }}</th><td>{{ first_seen.astimezone().strftime("%d/%m/%Y") }}</td></tr>{% endif %}
+  {% if host.discovery.found_by %}<tr><th>{{ _("Encontrado por") }}</th><td>{{ host.discovery.found_by.replace(",", ", ") }}</td></tr>{% endif %}
+  <tr><th>{{ _("Portas") }}</th><td>{% for s in host.services %}<code>{{ s.port }}{% if s.transport == "udp" %}/udp{% endif %}</code>
+    <span class="hint">{{ s.label }}</span><br>{% else %}<span class="hint">{{ _("nenhuma aberta") }}</span>{% endfor %}</td></tr>
+  {% if host.discovery.mdns_services %}<tr><th>{{ _("Anuncia") }}</th><td class="hint">{{ host.discovery.mdns_services.replace(",", ", ") }}</td></tr>{% endif %}
 </table>
 
 {% if actions %}
-<h3 style="margin-bottom:8px">O que fazer</h3>
+<h3 style="margin-bottom:8px">{{ _("O que fazer") }}</h3>
 {% for a in actions %}
-<div class="action sev-bar {{ a.severity.value }}"><div style="flex:1"><b>{{ a.title }}</b><div class="hint">{{ a.why }}</div>
-  <div class="hint" style="margin-top:4px">resolve {{ a.findings | length }} achado(s)</div></div></div>
+<div class="action sev-bar {{ a.severity.value }}"><div style="flex:1"><b>{{ action_title(a) }}</b><div class="hint">{{ _(a.why) }}</div>
+  <div class="hint" style="margin-top:4px">{{ _("resolve {n} achado(s)", n=a.findings | length) }}</div>
+{% set g = action_guide(a, scan) %}{% if g %}
+  <details class="guide"><summary><svg class="icon" aria-hidden="true"><use href="#i-tool"/></svg>{% if g.brand %}{{ _("Como fazer no seu {b}", b=g.brand) }}{% else %}{{ _("Como fazer") }}{% endif %}</summary>
+    <ol>{% for s in g.steps %}<li>{{ s }}</li>{% endfor %}</ol>
+  </details>{% endif %}
+</div></div>
 {% endfor %}
 {% endif %}
 
-<h3 style="margin:16px 0 8px">Achados ({{ findings | length }})</h3>
+<h3 style="margin:16px 0 8px">{{ _("Achados") }} ({{ findings | length }})</h3>
 {% for f in findings %}
 <div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)">
   <span class="badge sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
-  <span style="flex:1{% if f.accepted %};color:var(--muted){% endif %}">{{ f.title }}{% if f.accepted %} · aceito{% endif %}</span>
+  <span style="flex:1{% if f.accepted %};color:var(--muted){% endif %}">{{ f.title }}{% if f.accepted %} · {{ _("aceito") }}{% endif %}</span>
 </div>
-{% else %}<p class="ok">Nenhum achado neste aparelho.</p>{% endfor %}
+{% else %}<p class="ok">{{ _("Nenhum achado neste aparelho.") }}</p>{% endfor %}
 
 <div class="row" style="margin-top:18px">
-  {% if gui %}<a class="btn sm" href="/findings/{{ label | urlencode }}">Ver achados</a>
-  {% if findings %}<a class="btn sm ghost" href="/letter?label={{ label | urlencode }}&host={{ host.address | urlencode }}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>Carta</a>{% endif %}{% endif %}
-  <a class="btn sm subtle" href="/scan/{{ scan.scan_id }}">Relatório do scan</a>
+  {% if gui %}<a class="btn sm" href="/findings/{{ label | urlencode }}">{{ _("Ver achados") }}</a>
+  {% if findings %}<a class="btn sm ghost" href="/letter?label={{ label | urlencode }}&host={{ host.address | urlencode }}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>{{ _("Carta") }}</a>{% endif %}{% endif %}
+  <a class="btn sm subtle" href="/scan/{{ scan.scan_id }}">{{ _("Relatório do scan") }}</a>
 </div>

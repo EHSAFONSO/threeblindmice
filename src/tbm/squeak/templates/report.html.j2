@@ -209,7 +209,7 @@
       {% for h in r.hosts %}
         {% for s in h.services %}
         <tr>
-          <td>{% if loop.first %}<b>{{ h.address }}</b>{% if h.device_name or h.device_type %}<br>{{ h.device_name or "" }}{% if h.device_type %} <span class="muted">({{ h.device_type }})</span>{% endif %}{% endif %}{% if h.hostname %}<br><span class="muted">{{ h.hostname }}</span>{% endif %}{% if h.mac %}<br><span class="muted"><code>{{ h.mac }}</code>{% if h.vendor %} · {{ h.vendor }}{% endif %}</span>{% endif %}{% endif %}</td>
+          <td>{% if loop.first %}<b>{{ h.address }}</b>{% if h.name or h.device_type %}<br>{{ h.name or "" }}{% if h.device_type %} <span class="muted">({{ h.device_type }})</span>{% endif %}{% endif %}{% if h.hostname %}<br><span class="muted">{{ h.hostname }}</span>{% endif %}{% if h.mac %}<br><span class="muted"><code>{{ h.mac }}</code>{% if h.vendor %} · {{ h.vendor }}{% endif %}</span>{% endif %}{% endif %}</td>
           <td><code>{{ s.port }}/{{ s.transport }}</code></td>
           <td>{{ s.name or "?" }}{% if s.extra.smb_dialect %}<br><span class="muted">SMB {{ s.extra.smb_dialect }}</span>{% endif %}</td>
           <td>{{ s.product or "" }} {{ s.version or "" }}</td>

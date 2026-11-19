@@ -1,6 +1,7 @@
 {% extends "base.html.j2" %}
 {% block title %}Funcionalidades · threeblindmice{% endblock %}
 {% block content %}
+{% if get_lang() == "en" %}<div class="banner" style="margin-bottom:14px" role="note">This page is only available in Portuguese for now.</div>{% endif %}
 <style>
   .tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
   .tool { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }

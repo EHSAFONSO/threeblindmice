@@ -20,6 +20,9 @@
     tbmToast("Tema: " + {auto: "automático", light: "claro", dark: "escuro"}[next]);
   };
 
+  /* ── textos no idioma da interface (window.TBM_I18N vem do base.html.j2) ── */
+  const tr = s => (window.TBM_I18N || {})[s] || s;
+
   /* ── ações autenticadas (o token vem da própria página; outro site não consegue lê-lo) ── */
   window.tbmPost = async function (url, data) {
     const meta = document.querySelector('meta[name="tbm-token"]');
@@ -48,11 +51,12 @@
       const d = document.createElement("dialog");
       d.className = "tbm";
       d.innerHTML = `<h3></h3><p class="muted" style="margin:10px 0 18px"></p>
-        <div class="row" style="justify-content:flex-end"><button class="btn subtle" value="no">Cancelar</button>
+        <div class="row" style="justify-content:flex-end"><button class="btn subtle" value="no"></button>
         <button class="btn ${danger ? "danger" : ""}" value="yes"></button></div>`;
       d.querySelector("h3").textContent = title;
       d.querySelector("p").textContent = text || "";
-      d.querySelector('[value="yes"]').textContent = okLabel || "Confirmar";
+      d.querySelector('[value="yes"]').textContent = okLabel || tr("Confirmar");
+      d.querySelector('[value="no"]').textContent = tr("Cancelar");
       d.addEventListener("click", e => { const v = e.target.closest("button")?.value; if (v) { d.close(); resolve(v === "yes"); } });
       d.addEventListener("cancel", () => resolve(false));
       d.addEventListener("close", () => setTimeout(() => d.remove(), 50));
@@ -60,6 +64,49 @@
       d.showModal();
       d.querySelector('[value="yes"]').focus();
     });
+  };
+
+  /* ── pergunta com campo de texto (substitui prompt) ── */
+  window.tbmPrompt = function (title, text, value, okLabel) {
+    return new Promise(resolve => {
+      const d = document.createElement("dialog");
+      d.className = "tbm";
+      d.innerHTML = `<form method="dialog"><h3></h3><p class="muted" style="margin:10px 0"></p>
+        <input type="text" maxlength="40" style="width:100%;margin-bottom:18px">
+        <div class="row" style="justify-content:flex-end"><button class="btn subtle" value="no" type="button"></button>
+        <button class="btn" value="yes"></button></div></form>`;
+      d.querySelector("h3").textContent = title;
+      d.querySelector("p").textContent = text || "";
+      const input = d.querySelector("input");
+      input.value = value || "";
+      input.setAttribute("aria-label", title);
+      d.querySelector('[value="yes"]').textContent = okLabel || tr("Salvar");
+      d.querySelector('[value="no"]').textContent = tr("Cancelar");
+      let answered = false;
+      const finish = v => { if (!answered) { answered = true; resolve(v); } d.close(); };
+      d.querySelector('[value="no"]').addEventListener("click", () => finish(null));
+      d.querySelector("form").addEventListener("submit", e => { e.preventDefault(); finish(input.value.trim()); });
+      d.addEventListener("cancel", () => finish(null));
+      d.addEventListener("close", () => setTimeout(() => d.remove(), 50));
+      document.body.appendChild(d);
+      d.showModal();
+      input.select();
+    });
+  };
+
+  /* ── aparelhos conhecidos ── */
+  window.tbmRenameDevice = async function (identity, current) {
+    const alias = await tbmPrompt(tr("Nome do aparelho"), tr("Como você chama este aparelho? Deixe vazio para voltar ao nome detectado."), current);
+    if (alias === null) return;
+    try { await tbmPost("/api/device", { identity, alias }); location.reload(); }
+    catch (e) { tbmToast(e.message, "error"); }
+  };
+  window.tbmTrustDevice = async function (identity, trusted) {
+    try {
+      await tbmPost("/api/device", { identity, trusted });
+      tbmToast(trusted ? tr("Aparelho aprovado: não vai mais alertar como desconhecido") : tr("Aprovação removida"), "ok");
+      setTimeout(() => location.reload(), 600);
+    } catch (e) { tbmToast(e.message, "error"); }
   };
 
   /* ── painel lateral ── */
@@ -111,9 +158,9 @@
     el.classList.add("loading");
     try {
       const r = await fetch(el.dataset.get);
-      target.innerHTML = r.ok ? await r.text() : '<p class="muted">Erro ' + r.status + "</p>";
+      target.innerHTML = r.ok ? await r.text() : '<p class="muted">' + tr("Erro") + " " + r.status + "</p>";
       init(target);
-    } catch (e) { target.innerHTML = '<p class="muted">Falha ao carregar.</p>'; }
+    } catch (e) { target.innerHTML = '<p class="muted">' + tr("Falha ao carregar.") + "</p>"; }
     finally { el.classList.remove("loading"); }
   }
   function init(root) { root.querySelectorAll('[data-get][data-trigger="load"]').forEach(load); }

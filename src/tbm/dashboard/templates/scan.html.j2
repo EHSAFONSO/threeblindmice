@@ -1,45 +1,47 @@
 {% extends "base.html.j2" %}
-{% block title %}Novo scan · threeblindmice{% endblock %}
+{% block title %}{{ _("Novo scan") }} · threeblindmice{% endblock %}
 {% block content %}
 <section class="card" id="form-section">
-  <h1 style="font-size:22px;margin-bottom:6px">Novo scan</h1>
-  <p class="hint">O tbm descobre os aparelhos da rede, testa os serviços de cada um e dá uma nota de 0 a 100.
-    Só redes privadas são aceitas aqui. Para escanear um IP público (ex.: seu VPS), use a linha de comando com um <code>scope.yaml</code>.</p>
+  <h1 style="font-size:22px;margin-bottom:6px">{{ _("Novo scan") }}</h1>
+  <p class="hint">{{ _("O tbm descobre os aparelhos da rede, testa os serviços de cada um e dá uma nota de 0 a 100.") }}
+    {{ _("Só redes privadas são aceitas aqui. Para escanear um IP público (ex.: seu VPS), use a linha de comando com um") }} <code>scope.yaml</code>.</p>
   <form id="scan-form">
     <div class="grid cols-3">
       <div>
-        <label class="field" for="targets">O que escanear</label>
+        <label class="field" for="targets">{{ _("O que escanear") }}</label>
         <input type="text" id="targets" value="{{ suggested }}" style="width:100%" required aria-describedby="targets-hint">
-        <div class="hint" id="targets-hint">Detectamos a sua rede como <code>{{ suggested }}</code>. Também aceita um IP, uma faixa
-          (<code>192.168.0.10-50</code>) ou vários, separados por vírgula.</div>
+        <div class="hint" id="targets-hint">{{ _("Detectamos a sua rede como {net}.", net=suggested) }}
+          {{ _("Também aceita um IP, uma faixa (192.168.0.10-50) ou vários, separados por vírgula.") }}</div>
       </div>
       <div>
-        <label class="field" for="label">Nome do histórico</label>
+        <label class="field" for="label">{{ _("Nome do histórico") }}</label>
         <input type="text" id="label" value="{{ label }}" style="width:100%" required aria-describedby="label-hint">
-        <div class="hint" id="label-hint">Scans com o mesmo nome são comparados entre si.</div>
+        <div class="hint" id="label-hint">{{ _("Scans com o mesmo nome são comparados entre si.") }}</div>
       </div>
       <div>
-        <label class="field" for="ports">Portas</label>
+        <label class="field" for="ports">{{ _("Portas") }}</label>
         <select id="ports" style="width:100%">
-          <option value="common" selected>Comuns (86 portas, recomendado)</option>
-          <option value="web">Só web (HTTP/HTTPS)</option>
-          <option value="all">Todas (65.535; bem mais lento)</option>
+          <option value="common" selected>{{ _("Comuns (86 portas, recomendado)") }}</option>
+          <option value="web">{{ _("Só web (HTTP/HTTPS)") }}</option>
+          <option value="all">{{ _("Todas (65.535; bem mais lento)") }}</option>
         </select>
       </div>
     </div>
     <div style="margin-top:14px">
-      <label class="check"><input type="checkbox" id="udp" checked><span><b>Testar serviços UDP</b>
-        <span class="hint">Encontra SNMP, UPnP, mDNS, DNS e NTP. Acrescenta poucos segundos.</span></span></label>
-      <label class="check"><input type="checkbox" id="cve" checked><span><b>Procurar vulnerabilidades conhecidas (CVEs)</b>
-        <span class="hint">Consulta as bases públicas do NIST, da FIRST e do Ubuntu com o nome e a versão dos programas encontrados. Nenhum dado da sua rede é enviado.</span></span></label>
-      <label class="check"><input type="checkbox" id="gentle"><span><b>Modo cuidadoso</b>
-        <span class="hint">Mais lento e leve. Use se câmeras, lâmpadas ou outros aparelhos baratos travarem durante o scan.</span></span></label>
-      <label class="check"><input type="checkbox" id="active"><span><b>Testes ativos</b>
-        <span class="hint">Tenta login anônimo no FTP, pergunta ao SSH quais logins aceita e procura arquivos sensíveis nos sites.
-          Aparece nos logs dos aparelhos como tentativa de acesso: use só em equipamentos seus.</span></span></label>
+      <label class="check"><input type="checkbox" id="udp" checked><span><b>{{ _("Testar serviços UDP") }}</b>
+        <span class="hint">{{ _("Encontra SNMP, UPnP, mDNS, DNS e NTP. Acrescenta poucos segundos.") }}</span></span></label>
+      <label class="check"><input type="checkbox" id="cve" checked><span><b>{{ _("Procurar vulnerabilidades conhecidas (CVEs)") }}</b>
+        <span class="hint">{{ _("Consulta as bases públicas do NIST, da FIRST e do Ubuntu com o nome e a versão dos programas encontrados. Nenhum dado da sua rede é enviado.") }}</span></span></label>
+      <label class="check"><input type="checkbox" id="external"><span><b>{{ _("Verificações externas") }}</b>
+        <span class="hint">{{ _("Pergunta ao Shodan o que a internet vê do seu IP público e confere se o DNS do roteador diz a verdade (usando o DNS da Cloudflare). Envia o seu IP público para esses dois serviços.") }}</span></span></label>
+      <label class="check"><input type="checkbox" id="gentle"><span><b>{{ _("Modo cuidadoso") }}</b>
+        <span class="hint">{{ _("Mais lento e leve. Use se câmeras, lâmpadas ou outros aparelhos baratos travarem durante o scan.") }}</span></span></label>
+      <label class="check"><input type="checkbox" id="active"><span><b>{{ _("Testes ativos") }}</b>
+        <span class="hint">{{ _("Tenta login anônimo no FTP, pergunta ao SSH quais logins aceita e procura arquivos sensíveis nos sites.") }}
+          {{ _("Aparece nos logs dos aparelhos como tentativa de acesso: use só em equipamentos seus.") }}</span></span></label>
     </div>
     <div class="row" style="margin-top:16px">
-      <button class="btn" id="start" type="submit"><svg class="icon" aria-hidden="true"><use href="#i-radar"/></svg>Iniciar scan</button>
+      <button class="btn" id="start" type="submit"><svg class="icon" aria-hidden="true"><use href="#i-radar"/></svg>{{ _("Iniciar scan") }}</button>
     </div>
   </form>
 </section>
@@ -47,19 +49,19 @@
 <section id="progress-section" hidden aria-live="polite">
   <ol class="steps" id="steps">
     {% for name in ["Descoberta", "Portas", "Serviços", "Análise"] %}
-    <li data-step="{{ loop.index0 }}"><span class="n">{{ loop.index }}</span>{{ name }}</li>
+    <li data-step="{{ loop.index0 }}"><span class="n">{{ loop.index }}</span>{{ _(name) }}</li>
     {% endfor %}
   </ol>
   <div class="card">
     <div class="row" style="gap:24px;align-items:center">
       <div class="radar" id="radar" aria-hidden="true"></div>
       <div style="flex:1;min-width:240px">
-        <h2 id="progress-title" style="margin:0 0 4px">Procurando aparelhos…</h2>
+        <h2 id="progress-title" style="margin:0 0 4px">{{ _("Procurando aparelhos…") }}</h2>
         <div class="hint" id="progress-detail"></div>
         <div class="progress" style="margin-top:12px" aria-hidden="true"><div id="bar" style="width:0"></div></div>
       </div>
     </div>
-    <h3 style="margin:18px 0 10px">Encontrados <span class="hint" id="found-count"></span></h3>
+    <h3 style="margin:18px 0 10px">{{ _("Encontrados") }} <span class="hint" id="found-count"></span></h3>
     <div class="found-list" id="found"></div>
   </div>
   <div id="result"></div>
@@ -69,7 +71,17 @@
 const $ = id => document.getElementById(id);
 const STEP = {"Scout · descoberta de hosts": 0, "Scout · varredura de portas": 1, "Scout · identificação de serviços": 2,
               "Scout · sondas UDP": 2, "Sniffer · checks": 3};
-const LABEL = ["Procurando aparelhos…", "Verificando portas abertas…", "Identificando serviços…", "Analisando riscos…"];
+const T = {{ {
+  "steps": [_("Procurando aparelhos…"), _("Verificando portas abertas…"), _("Identificando serviços…"), _("Analisando riscos…")],
+  "ports": _("{n} porta(s)"), "ready": _("Pronto em {s}s"), "done": _("Scan concluído"), "panel": _("Ver o painel"),
+  "fix": _("O que corrigir"), "map": _("Mapa da rede"), "report": _("Relatório completo"), "none": _("nenhum problema"),
+  "devices": _("{n} dispositivo(s)"), "accepted": _("{n} aceito(s)"),
+  "since": _("Desde o scan anterior: {a} novo(s), {b} resolvido(s)"), "unseen": _("aparelho(s) inédito(s):"),
+  "alerted": _("alerta enviado"), "first": _("Primeiro scan deste histórico: os próximos serão comparados com este."),
+  "failed": _("O scan falhou"),
+} | tojson }};
+const fmt = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k]);
+const LABEL = T.steps;
 
 $("scan-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -77,7 +89,7 @@ $("scan-form").addEventListener("submit", async (e) => {
   try {
     const body = await tbmPost("/api/scan", {
       targets: $("targets").value, label: $("label").value, ports: $("ports").value,
-      udp: $("udp").checked, cve: $("cve").checked, gentle: $("gentle").checked, active: $("active").checked,
+      udp: $("udp").checked, cve: $("cve").checked, external: $("external").checked, gentle: $("gentle").checked, active: $("active").checked,
     });
     watch(body.job);
   } catch (err) { tbmToast(err.message, "error"); $("start").disabled = false; }
@@ -94,7 +106,7 @@ function deviceChip(d) {
   }
   chip.querySelector("use").setAttribute("href", "#i-" + (d.gateway ? "router" : (d.icon || "device")));
   chip.querySelector(".n").textContent = d.name || d.type || d.address;
-  chip.querySelector(".a").textContent = (d.name || d.type) ? d.address : (d.ports != null ? d.ports + " porta(s)" : "");
+  chip.querySelector(".a").textContent = (d.name || d.type) ? d.address : (d.ports != null ? fmt(T.ports, {n: d.ports}) : "");
 }
 
 function render(job) {
@@ -121,7 +133,7 @@ function done(job) {
   const s = job.summary;
   $("radar").classList.add("stopped");
   document.querySelectorAll("#steps li").forEach(li => { li.classList.add("done"); li.classList.remove("active"); });
-  $("progress-title").textContent = `Pronto em ${job.elapsed}s`;
+  $("progress-title").textContent = fmt(T.ready, {s: job.elapsed});
   $("bar").style.width = "100%";
   const r = document.createElement("div");
   r.className = "card";
@@ -130,23 +142,23 @@ function done(job) {
         <circle class="value" cx="90" cy="90" r="78" fill="none" stroke-width="14" stroke-linecap="round" stroke="currentColor"
           style="stroke-dasharray:490;stroke-dashoffset:490"/></svg>
         <div class="center"><span class="grade" style="font-size:40px"></span><span class="score"></span></div></div>
-      <div style="flex:1"><h2 style="margin:0 0 6px">Scan concluído</h2><p class="muted sum" style="margin:0"></p><p class="diff hint"></p></div>
+      <div style="flex:1"><h2 style="margin:0 0 6px">${T.done}</h2><p class="muted sum" style="margin:0"></p><p class="diff hint"></p></div>
     </div>
     <div class="row" style="margin-top:14px">
-      <a class="btn" href="/?label=${encodeURIComponent(s.label)}">Ver o painel</a>
-      <a class="btn subtle" href="/findings/${encodeURIComponent(s.label)}">O que corrigir</a>
-      <a class="btn subtle" href="/map/${encodeURIComponent(s.label)}">Mapa da rede</a>
-      <a class="btn ghost" href="/scan/${encodeURIComponent(s.scan_id)}">Relatório completo</a></div>`;
+      <a class="btn" href="/?label=${encodeURIComponent(s.label)}">${T.panel}</a>
+      <a class="btn subtle" href="/findings/${encodeURIComponent(s.label)}">${T.fix}</a>
+      <a class="btn subtle" href="/map/${encodeURIComponent(s.label)}">${T.map}</a>
+      <a class="btn ghost" href="/scan/${encodeURIComponent(s.scan_id)}">${T.report}</a></div>`;
   const g = r.querySelector(".gauge"); g.classList.add("grade-" + s.grade);
   g.style.color = getComputedStyle(document.documentElement).getPropertyValue("--" + ({A: "good", B: "good", C: "medium", D: "high", F: "critical"}[s.grade]));
   r.querySelector(".grade").textContent = s.grade;
   r.querySelector(".score").textContent = `${s.score}/100` + (s.score_delta ? ` (${s.score_delta > 0 ? "+" : ""}${s.score_delta})` : "");
-  const counts = Object.entries(s.counts).filter(([k, n]) => n && k !== "info").map(([k, n]) => `${n} ${k}`).join(" · ") || "nenhum problema";
-  r.querySelector(".sum").textContent = `${s.hosts} dispositivo(s) · ${counts}` + (s.accepted ? ` · ${s.accepted} aceito(s)` : "");
+  const counts = Object.entries(s.counts).filter(([k, n]) => n && k !== "info").map(([k, n]) => `${n} ${k}`).join(" · ") || T.none;
+  r.querySelector(".sum").textContent = fmt(T.devices, {n: s.hosts}) + " · " + counts + (s.accepted ? " · " + fmt(T.accepted, {n: s.accepted}) : "");
   r.querySelector(".diff").textContent = s.previous
-    ? `Desde o scan anterior: ${s.new_findings} novo(s), ${s.resolved} resolvido(s)` + (s.new_devices.length ? ` · aparelho(s) inédito(s): ${s.new_devices.join(", ")}` : "")
-      + (s.alerted === true ? " · alerta enviado" : "")
-    : "Primeiro scan deste histórico: os próximos serão comparados com este.";
+    ? fmt(T.since, {a: s.new_findings, b: s.resolved}) + (s.new_devices.length ? ` · ${T.unseen} ${s.new_devices.join(", ")}` : "")
+      + (s.alerted === true ? " · " + T.alerted : "")
+    : T.first;
   $("result").appendChild(r);
   requestAnimationFrame(() => setTimeout(() => { r.querySelector(".value").style.strokeDashoffset = 490 * (1 - s.score / 100); }, 50));
 }
@@ -160,7 +172,7 @@ async function watch(jobId) {
     if (job.status === "done") { done(job); return; }
     if (job.status === "error") {
       $("radar").classList.add("stopped");
-      $("progress-title").textContent = "O scan falhou";
+      $("progress-title").textContent = T.failed;
       $("progress-detail").textContent = job.error;
       tbmToast(job.error, "error");
       return;

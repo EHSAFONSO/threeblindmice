@@ -1,0 +1,37 @@
+# Atualizações automáticas, com quarentena: o Dependabot só propõe versões
+# publicadas há pelo menos 3 dias (cooldown), a mesma regra dos locks.
+# As dependências Python ficam no lock-refresh.yml, que usa o uv e o pip-audit.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /.github/actions/install
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /integration
+      - /integration/ftp
+      - /integration/snmp
+      - /integration/ssh
+      - /integration/web
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    groups:
+      images:
+        patterns: ["*"]
