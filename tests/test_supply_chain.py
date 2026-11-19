@@ -69,6 +69,13 @@ def _steps(doc):
 
 
 @pytest.mark.parametrize("wf", WORKFLOWS, ids=lambda p: p.name)
+def test_workflow_yaml_is_valid(wf):
+    """Um `:all: ` solto num `run:` vira chave de mapa e derruba o job inteiro."""
+    doc = yaml.safe_load(wf.read_text(encoding="utf-8"))
+    assert isinstance(doc, dict) and ("jobs" in doc or "runs" in doc)
+
+
+@pytest.mark.parametrize("wf", WORKFLOWS, ids=lambda p: p.name)
 def test_actions_pinned_by_commit_sha(wf):
     for line in wf.read_text(encoding="utf-8").splitlines():
         m = re.search(r"uses:\s*([^\s#]+)", line)

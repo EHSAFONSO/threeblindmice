@@ -22,7 +22,8 @@ runs:
     - name: pip e setuptools travados
       shell: bash
       # Antes da política: o pip que vem no Python pode ser antigo demais para --uploaded-prior-to.
-      run: python -m pip install --require-hashes --only-binary :all: --no-deps -r requirements/bootstrap.txt
+      run: |
+        python -m pip install --require-hashes --only-binary :all: --no-deps -r requirements/bootstrap.txt
     - name: Dependências travadas
       shell: bash
       run: |
