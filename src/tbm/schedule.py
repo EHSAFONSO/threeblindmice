@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from tbm.frozen import CLI_EXE, GUI_EXE, SCHEDULED_FLAG, bundle_exe, is_frozen
 from tbm.paths import no_window, tbm_home
 
 
@@ -43,6 +44,8 @@ def task_name(label: str) -> str:
 
 
 def tbm_executable() -> str:
+    if is_frozen():
+        return str(bundle_exe(CLI_EXE))
     found = shutil.which("tbm")
     if found:
         return found
@@ -98,11 +101,15 @@ def build_plan(platform: str, targets: list[str], label: str, seconds: int,
         # curto (o limite do schtasks é 261 caracteres). Os argumentos do scan
         # ficam num JSON em TBM_HOME, e a saída de cada execução vai para um log.
         spec = windows_spec(label)
-        runner = pythonw() or Path(sys.executable)
-        tr = subprocess.list2cmdline([str(runner), "-m", "tbm._scheduled", label])
+        if is_frozen():  # instalado pelo setup.exe: o próprio app, sem console, faz o papel do pythonw
+            runner = bundle_exe(GUI_EXE)
+            tr = subprocess.list2cmdline([str(runner), SCHEDULED_FLAG, label])
+        else:
+            runner = pythonw() or Path(sys.executable)
+            tr = subprocess.list2cmdline([str(runner), "-m", "tbm._scheduled", label])
         content = json.dumps({"label": label, "argv": scan_args(targets, label, extra),
                               "created": datetime.now().isoformat(timespec="seconds")}, indent=2)
-        if runner.name.lower() != "pythonw.exe":
+        if not is_frozen() and runner.name.lower() != "pythonw.exe":
             warnings.append("pythonw.exe não encontrado: a tarefa vai abrir uma janela durante o scan.")
         return SchedulePlan(
             platform="Windows (Agendador de Tarefas)",
@@ -159,6 +166,22 @@ def remove_plan(platform: str, label: str) -> SchedulePlan:
                             commands=[["systemctl", "--user", "disable", "--now", f"{name}.timer"]],
                             cleanup=[unit_dir / f"{name}.service", unit_dir / f"{name}.timer"])
     return SchedulePlan("cron", "remover", manual="Rode `crontab -e` e apague a linha do threeblindmice.")
+
+
+def windows_tasks_using(directory: Path) -> list[str]:
+    """Rótulos dos vigias do Windows cuja tarefa roda um executável dentro de `directory`.
+
+    Usado pelo desinstalador: remove só as tarefas criadas pela cópia instalada,
+    nunca as de uma instalação via pip (que apontam para outro Python).
+    """
+    found = []
+    needle = str(directory).lower().rstrip("\\/") + "\\"
+    for spec in sorted((tbm_home() / "schedules").glob(f"{task_name('*')}.json")):
+        proc = subprocess.run(["schtasks", "/Query", "/TN", spec.stem, "/XML"], capture_output=True, text=True,
+                              check=False, **no_window())
+        if proc.returncode == 0 and needle in proc.stdout.lower():
+            found.append(spec.stem.removeprefix(task_name("")))
+    return found
 
 
 def execute(plan: SchedulePlan) -> list[str]:

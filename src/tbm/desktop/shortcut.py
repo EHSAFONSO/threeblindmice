@@ -8,6 +8,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tbm.frozen import GUI_EXE, bundle_exe, is_frozen
 from tbm.paths import no_window
 
 NAME = "threeblindmice"
@@ -24,6 +25,8 @@ class ShortcutPlan:
 
 def launcher() -> tuple[str, list[str]]:
     """Executável e argumentos: pythonw (sem console) no Windows."""
+    if is_frozen():
+        return str(bundle_exe(GUI_EXE)), []
     exe = Path(sys.executable)
     if sys.platform == "win32" and exe.with_name("pythonw.exe").exists():
         exe = exe.with_name("pythonw.exe")

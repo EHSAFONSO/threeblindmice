@@ -14,6 +14,20 @@ São três "mice" que trabalham em sequência:
 
 ## Instalação
 
+### Windows: instalador
+
+Baixe o `threeblindmice_<versão>_x64-setup.exe` na [página de releases](https://github.com/EHSAFONSO/threeblindmice/releases/latest) e execute. Não precisa de Python nem de permissão de administrador. O instalador cria o atalho no menu Iniciar (e, se você quiser, na Área de Trabalho) e pode adicionar o comando `tbm` ao terminal. Ele aparece em "Aplicativos instalados", de onde dá para desinstalar. A desinstalação remove os vigias criados pelo app, mas mantém o seu histórico em `~/.threeblindmice`.
+
+O instalador ainda não tem assinatura digital, então o Windows pode mostrar "O Windows protegeu o computador": clique em *Mais informações* e depois em *Executar assim mesmo*. Antes, confira que o arquivo é o original comparando o SHA-256 com o do arquivo `.sha256` publicado na release:
+
+```bash
+certutil -hashfile threeblindmice_0.7.1_x64-setup.exe SHA256
+```
+
+Para gerar o instalador você mesmo: `pip install -e ".[desktop]" pyinstaller` e `python packaging/windows/build.py` (precisa do [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
+
+### Pelo Python (Windows, Linux e macOS)
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows  (Linux/macOS: source .venv/bin/activate)

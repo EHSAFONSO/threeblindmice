@@ -3,7 +3,8 @@
 #   2. confere que a tag bate com a versão do pyproject.toml
 #   3. publica no PyPI (trusted publishing, sem token guardado no repositório)
 #   4. publica a imagem Docker no GHCR
-#   5. cria o GitHub Release com os artefatos
+#   5. gera o instalador do Windows (PyInstaller + Inno Setup)
+#   6. cria o GitHub Release com os artefatos
 #
 # Configuração única no PyPI (antes do primeiro release):
 #   pypi.org → Your projects → Publishing → Add a new pending publisher
@@ -43,8 +44,28 @@ jobs:
           name: dist
           path: dist/
 
+  windows-installer:
+    needs: ci
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - run: pip install ".[desktop]" "pyinstaller>=6.22,<7"
+      - run: python packaging/windows/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*-setup.exe*
+
   pypi:
-    needs: build
+    # espera o instalador: assim PyPI e GitHub Release saem juntos ou nenhum sai
+    needs: [build, windows-installer]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -85,7 +106,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   github-release:
-    needs: [pypi, docker]
+    needs: [pypi, docker, windows-installer]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -94,7 +115,18 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+          body: |
+            **Windows:** baixe o `threeblindmice_*_x64-setup.exe` abaixo e execute. Não precisa de Python.
+            O instalador ainda não tem assinatura digital: o Windows pode mostrar "O Windows protegeu o computador";
+            clique em *Mais informações* → *Executar assim mesmo*. Para conferir que o arquivo é o original,
+            compare o SHA-256 (`certutil -hashfile <arquivo> SHA256`) com o do `.sha256` desta página.
+
+            **Python:** `pip install "threeblindmice[desktop]"`

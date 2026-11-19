@@ -868,6 +868,22 @@ def desktop_app(
     raise typer.Exit(code)
 
 
+@app.command("uninstall-cleanup", hidden=True)
+def uninstall_cleanup() -> None:
+    """Chamado pelo desinstalador do Windows: remove os vigias desta cópia instalada."""
+    from tbm import schedule
+    from tbm.frozen import is_frozen
+
+    if not is_frozen() or sys.platform != "win32":
+        raise _fail("só faz sentido na versão instalada pelo setup.exe")
+    for label in schedule.windows_tasks_using(Path(sys.executable).parent):
+        try:
+            schedule.execute(schedule.remove_plan("win32", label))
+            console.print(f"vigia '{label}' removido")
+        except RuntimeError as exc:
+            console.print(f"[yellow]vigia '{label}': {exc}[/]")
+
+
 shortcut_app = typer.Typer(help="Atalho para abrir o app sem terminal (menu Iniciar / lançador).")
 app.add_typer(shortcut_app, name="shortcut")
 

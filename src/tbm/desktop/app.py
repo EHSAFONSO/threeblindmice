@@ -79,6 +79,8 @@ def window_icon_is_custom(title: str) -> bool | None:
     big = user32.SendMessageW(hwnd, 0x7F, 1, 0)  # WM_GETICON, ICON_BIG
     if not big:
         return False
+    if getattr(sys, "frozen", False):  # instalado: o próprio .exe já tem o ícone dos ratos
+        return True
     # Compara com o ícone embutido no executável do Python
     shell32 = ctypes.windll.shell32
     shell32.ExtractIconW.restype = ctypes.c_void_p
