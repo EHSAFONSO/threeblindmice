@@ -14,7 +14,7 @@ jobs:
     name: lint + types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/install
         with:
           python-version: "3.12"
@@ -37,7 +37,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/install
         with:
           python-version: ${{ matrix.python }}
@@ -54,7 +54,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/install
         with:
           python-version: "3.12"
@@ -67,7 +67,7 @@ jobs:
     # Vulnerabilidades conhecidas (OSV/PyPI) em tudo o que os locks instalam.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/install
         with:
           python-version: "3.12"
@@ -81,7 +81,7 @@ jobs:
     # Sobe serviços vulneráveis de propósito e roda o tbm contra eles, dentro da rede do Compose.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       # Serviços em segundo plano e só o scanner em primeiro plano: se um serviço
       # cair, apenas o teste dele falha (com --abort-on-container-exit, um crash
       # derrubava o scanner antes de qualquer assert).
@@ -104,7 +104,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09  # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: ./.github/actions/install
         with:
           python-version: "3.12"
