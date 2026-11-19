@@ -2,7 +2,7 @@
 #   docker build -t tbm .
 #   docker run --rm --network host -v tbm-data:/data tbm scan 192.168.0.0/24 --label casa
 # Imagem base fixada por digest (tag + digest): a tag sozinha pode apontar para outra imagem amanhã.
-FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
