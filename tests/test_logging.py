@@ -81,8 +81,13 @@ def test_cli_log_level_option():
 
 def test_help_survives_a_cp1252_pipe(tmp_path):
     """No Windows, `tbm scan --help | findstr` quebrava no "→" da descrição (UnicodeEncodeError)."""
-    env = {**os.environ, "PYTHONIOENCODING": "cp1252", "TBM_HOME": str(tmp_path)}
+    import re
+
+    # sem cor: no CI o Rich força ANSI (FORCE_COLOR), que partiria o "--discovery" em pedaços
+    env = {k: v for k, v in os.environ.items() if k not in ("FORCE_COLOR", "PY_COLORS", "CLICOLOR_FORCE")}
+    env.update(PYTHONIOENCODING="cp1252", TBM_HOME=str(tmp_path), NO_COLOR="1", TERM="dumb", COLUMNS="120")
     proc = subprocess.run([sys.executable, "-m", "tbm", "scan", "--help"], capture_output=True, env=env,
                           timeout=60, check=False)
     assert proc.returncode == 0, proc.stderr.decode("cp1252", "replace")[-500:]
-    assert b"--discovery" in proc.stdout
+    plain = re.sub(rb"\x1b\[[0-9;]*m", b"", proc.stdout)
+    assert b"--discovery" in plain
