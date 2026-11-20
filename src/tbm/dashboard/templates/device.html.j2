@@ -3,12 +3,14 @@
   <div style="flex:1">
     <h2 style="margin:0 0 4px">{{ host.name or host.address }}</h2>
     <div class="hint">{{ host.device_type | dtype or _("tipo desconhecido") }}</div>
+    <a class="hint" href="/device/{{ label | urlencode }}/{{ host.address }}">{{ _("Abrir página completa →") }}</a>
   </div>
   <button class="icon-btn" type="button" onclick="tbmCloseDrawer()" aria-label="{{ _("Fechar") }}"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
 </div>
 
 <table style="margin:16px 0">
   <tr><th>IP</th><td class="mono">{{ host.address }}</td></tr>
+  {% if model_label(host) %}<tr><th>{{ _("Modelo") }}</th><td>{{ model_label(host) }}</td></tr>{% endif %}
   {% if host.mac %}<tr><th>MAC</th><td class="mono">{{ host.mac }}{% if host.vendor %}<br><span class="hint">{{ host.vendor }}</span>{% endif %}</td></tr>{% endif %}
   {% if first_seen %}<tr><th>{{ _("Visto desde") }}</th><td>{{ first_seen.astimezone().strftime("%d/%m/%Y") }}</td></tr>{% endif %}
   {% if host.discovery.found_by %}<tr><th>{{ _("Encontrado por") }}</th><td>{{ host.discovery.found_by.replace(",", ", ") }}</td></tr>{% endif %}
@@ -33,7 +35,7 @@
 <h3 style="margin:16px 0 8px">{{ _("Achados") }} ({{ findings | length }})</h3>
 {% for f in findings %}
 <div class="row" style="padding:6px 0;border-bottom:1px solid var(--line)">
-  <span class="badge sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
+  <span class="badge sev-{{ f.severity.value }}">{{ f.severity | sev }}</span>
   <span style="flex:1{% if f.accepted %};color:var(--muted){% endif %}">{{ f.title }}{% if f.accepted %} · {{ _("aceito") }}{% endif %}</span>
 </div>
 {% else %}<p class="ok">{{ _("Nenhum achado neste aparelho.") }}</p>{% endfor %}

@@ -78,6 +78,32 @@ def suggested_target() -> str:
     return "192.168.0.0/24"
 
 
+def local_networks() -> list[str]:
+    """Todas as redes privadas (/24) em que este computador tem endereço.
+
+    Mostra redes de convidados, VLANs, adaptadores de VM e cabo + Wi-Fi ao mesmo
+    tempo, para você escolher o que escanear. Sem enviar nada pela rede.
+    """
+    import ipaddress
+    import socket
+
+    found: list[str] = []
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+    except OSError:
+        infos = []
+    addrs = [str(i[4][0]) for i in infos]
+    if ip := local_ipv4():
+        addrs.insert(0, ip)
+    for a in addrs:
+        addr = ipaddress.ip_address(a)
+        if addr.is_private and not addr.is_loopback and not addr.is_link_local:
+            net = str(ipaddress.ip_network(f"{a}/24", strict=False))
+            if net not in found:
+                found.append(net)
+    return found
+
+
 # ───────────────────────────── ping ─────────────────────────────
 
 

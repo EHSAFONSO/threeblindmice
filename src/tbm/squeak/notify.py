@@ -13,8 +13,10 @@ Formatos de destino aceitos em --notify / TBM_WEBHOOK:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -126,6 +128,25 @@ def text_delivery(target: str, text: str, *, title: str = "threeblindmice", prio
             "Tags": "mouse,shield",
         })
 
+    if parsed.scheme == "pushover":
+        # pushover://<app_token>@<user_key> — sem urlparse.hostname, que deixa minúsculo
+        token2, _, user2 = parsed.netloc.partition("@")
+        if not token2 or not user2:
+            raise ValueError("Pushover: use pushover://<app_token>@<user_key>.")
+        prio = {"urgent": "1", "high": "1"}.get(priority, "0")
+        return Delivery("https://api.pushover.net/1/messages.json",
+                        json={"token": token2, "user": user2, "message": text[:1024], "title": title, "priority": prio})
+
+    if parsed.scheme in ("hass", "homeassistant"):
+        # hass://<host>/<webhook_id>  (webhook do Home Assistant; use https:// no host real)
+        webhook = parsed.path.strip("/")
+        if not webhook or not host:
+            raise ValueError("Home Assistant: use hass://<host>/<webhook_id>.")
+        scheme = "https" if parsed.port in (None, 443, 8123) and parsed.port != 8123 else "http"
+        base = f"{scheme}://{host}" + (f":{parsed.port}" if parsed.port else "")
+        payload = {"title": title, "message": text, "priority": priority, **(extra or {})}
+        return Delivery(f"{base}/api/webhook/{webhook}", json=payload)
+
     if host.endswith("discord.com") or host.endswith("discordapp.com"):
         return Delivery(target, json={"content": text[:1990], "username": "threeblindmice"})
     if host.endswith("slack.com"):
@@ -135,10 +156,50 @@ def text_delivery(target: str, text: str, *, title: str = "threeblindmice", prio
 
 async def send_text(target: str, text: str, *, title: str = "threeblindmice",
                     transport: httpx.AsyncBaseTransport | None = None) -> None:
+    if urlparse(target).scheme in ("smtp", "smtps", "mailto"):
+        await asyncio.to_thread(_send_email, target, title, text)
+        return
     d = text_delivery(target, text, title=title)
     async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT}, transport=transport) as client:
         resp = await client.post(d.url, json=d.json, content=d.content, headers=d.headers)
         resp.raise_for_status()
+
+
+def _send_email(target: str, subject: str, body: str) -> None:
+    """E-mail por SMTP. Formato: smtp(s)://usuario:senha@servidor:porta/destinatario@exemplo.com
+
+    Fora do modelo HTTP das outras notificações: aqui a entrega é por smtplib,
+    numa thread (é bloqueante). A porta 465 usa SSL direto; 587/25 usam STARTTLS.
+    """
+    import smtplib
+    from email.message import EmailMessage
+    from urllib.parse import unquote
+
+    p = urlparse(target)
+    to_addr = unquote(p.path.strip("/"))
+    if not p.hostname or not to_addr:
+        raise ValueError("E-mail: use smtp://usuario:senha@servidor:porta/destino@exemplo.com")
+    user = unquote(p.username) if p.username else None
+    password = unquote(p.password) if p.password else None
+    port = p.port or (465 if p.scheme == "smtps" else 587)
+    msg = EmailMessage()
+    msg["From"] = user or f"threeblindmice@{p.hostname}"
+    msg["To"] = to_addr
+    msg["Subject"] = subject
+    msg.set_content(body)
+    if p.scheme == "smtps" or port == 465:
+        with smtplib.SMTP_SSL(p.hostname, port, timeout=20) as s:
+            if user and password:
+                s.login(user, password)
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP(p.hostname, port, timeout=20) as s:
+            s.ehlo()
+            if port != 25:
+                s.starttls()
+            if user and password:
+                s.login(user, password)
+            s.send_message(msg)
 
 
 def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> dict:
@@ -163,14 +224,27 @@ async def send_test(url: str, transport: httpx.AsyncBaseTransport | None = None)
     return resp.status_code
 
 
+def in_quiet_hours(start: str, end: str, now: datetime | None = None) -> bool:
+    """Estamos dentro da janela de silêncio (HH:MM–HH:MM, atravessa a meia-noite)?"""
+    try:
+        s, e = datetime.strptime(start, "%H:%M").time(), datetime.strptime(end, "%H:%M").time()
+    except (ValueError, TypeError):
+        return False
+    cur = (now or datetime.now()).time()
+    return (s <= cur < e) if s <= e else (cur >= s or cur < e)
+
+
 async def send_webhook(
     url: str, result: ScanResult, diff: ScanDiff, min_severity: Severity = Severity.MEDIUM,
-    transport: httpx.AsyncBaseTransport | None = None,
+    transport: httpx.AsyncBaseTransport | None = None, quiet: tuple[str, str] | None = None,
 ) -> bool:
     """Retorna True se enviou, False se não havia nada relevante."""
     items = relevant(diff, min_severity)
     # Só o inédito alerta (diff.alert_*): porta de celular que dorme e acorda não é novidade.
     if not items and not diff.alert_hosts and not diff.alert_ports and not diff.mac_changes:
+        return False
+    # Horário de silêncio: segura tudo que não for crítico (um crítico sempre passa).
+    if quiet and in_quiet_hours(*quiet) and (_highest(items) or Severity.LOW).rank < Severity.CRITICAL.rank:
         return False
     d = build_delivery(url, result, diff, items)
     async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT},

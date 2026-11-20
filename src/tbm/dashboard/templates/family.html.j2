@@ -1,0 +1,47 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ _("Relatório da rede") }} · {{ h.label }}{% endblock %}
+{% block content %}
+{% set s = h.scan %}
+<div class="row no-print" style="margin-bottom:12px">
+  <h1>{{ _("Relatório para a família") }}</h1><span class="spacer"></span>
+  <button class="btn" type="button" onclick="window.print()"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>{{ _("Imprimir / salvar PDF") }}</button>
+</div>
+<p class="hint no-print">{{ _("Uma página simples, sem jargão, para mandar para quem cuida da rede ou guardar.") }}</p>
+
+<article class="card" style="max-width:720px;margin:0 auto">
+  <div class="row" style="gap:20px;align-items:center">
+    <div class="gauge glow-{{ s.grade }}" style="width:120px;height:120px">
+      <svg viewBox="0 0 180 180" aria-hidden="true">
+        <circle class="track" cx="90" cy="90" r="{{ h.gauge.r }}" fill="none" stroke-width="16"/>
+        <circle class="value" cx="90" cy="90" r="{{ h.gauge.r }}" fill="none" stroke-width="16" stroke-linecap="round"
+                style="stroke-dasharray:{{ h.gauge.c }};stroke-dashoffset:{{ h.gauge.offset }}"/></svg>
+      <div class="center"><span class="grade">{{ s.grade }}</span></div>
+    </div>
+    <div>
+      <h2 style="margin:0">{{ _("Saúde da rede: {g} de A a F", g=s.grade) }}</h2>
+      <p class="muted" style="margin:6px 0 0">
+        {% if s.grade in ("A", "B") %}{{ _("A rede está bem cuidada.") }}
+        {% elif s.grade == "C" %}{{ _("A rede está razoável, com alguns pontos a melhorar.") }}
+        {% else %}{{ _("A rede precisa de atenção. Veja o que fazer abaixo.") }}{% endif %}</p>
+      <p class="hint" style="margin:6px 0 0">{{ _("{n} aparelho(s) na rede · verificado em {t}", n=h.devices, t=s.started_at.astimezone().strftime("%d/%m/%Y")) }}</p>
+    </div>
+  </div>
+
+  {% if h.actions %}
+  <h3 style="margin:22px 0 8px">{{ _("O que fazer, em ordem de importância") }}</h3>
+  <ol style="line-height:1.7;padding-left:20px">
+    {% for a in h.actions[:5] %}<li><b>{{ action_title(a) }}.</b> {{ _(a.why) }}</li>{% endfor %}
+  </ol>
+  {% else %}
+  <p class="ok" style="margin-top:20px">{{ _("Nada a corrigir agora. 🎉") }}</p>
+  {% endif %}
+
+  <h3 style="margin:22px 0 8px">{{ _("Aparelhos encontrados") }}</h3>
+  <table>
+    {% for host in s.hosts %}<tr><td>{{ host.name or host.device_type | dtype or host.address }}</td>
+      <td class="hint">{{ host.device_type | dtype or "" }}</td></tr>{% endfor %}
+  </table>
+
+  <p class="hint" style="margin-top:22px;text-align:center">{{ _("Gerado pelo threeblindmice · nota de 0 a 100, onde A é o melhor.") }}</p>
+</article>
+{% endblock %}

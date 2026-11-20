@@ -1,0 +1,23 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ _("Comparar scans") }} · {{ label }}{% endblock %}
+{% block content %}
+<h1>{{ _("Comparar dois scans") }} · {{ label }}</h1>
+<p class="hint">{{ _("Escolha dois momentos para ver lado a lado o que mudou na sua rede.") }}</p>
+<div class="row" style="margin:12px 0">
+  <label class="hint">{{ _("Antes") }} <select id="a">
+    {% for r in rows %}<option value="{{ r.scan_id }}"{% if loop.index == 2 %} selected{% endif %}>{{ r.started_at | when }} · {{ r.grade }} {{ r.score }}</option>{% endfor %}
+  </select></label>
+  <label class="hint">{{ _("Depois") }} <select id="b">
+    {% for r in rows %}<option value="{{ r.scan_id }}"{% if loop.first %} selected{% endif %}>{{ r.started_at | when }} · {{ r.grade }} {{ r.score }}</option>{% endfor %}
+  </select></label>
+</div>
+<div id="out"><div class="skeleton block"></div></div>
+<script>
+const $ = id => document.getElementById(id);
+async function load() {
+  $("out").innerHTML = '<div class="skeleton block"></div>';
+  $("out").innerHTML = await (await fetch(`/partials/compare/${$("a").value}/${$("b").value}`)).text();
+}
+$("a").addEventListener("change", load); $("b").addEventListener("change", load); load();
+</script>
+{% endblock %}

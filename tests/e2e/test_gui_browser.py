@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import socket
 import sys
 import threading
@@ -180,7 +181,7 @@ def test_rename_and_approve_device(page, server):
     card = page.locator("article", has_text="192.168.0.50")
     expect(card.get_by_text("TV da sala")).to_be_visible()
     card.get_by_role("button", name="Aprovar").click()
-    expect(page.locator("article", has_text="192.168.0.50").get_by_text("✓ conhecido")).to_be_visible()
+    expect(page.locator("article", has_text="192.168.0.50").get_by_text("conhecido", exact=True)).to_be_visible()
     assert any(r["alias"] == "TV da sala" and r["trusted"] for r in server[2].devices().values())
 
 
@@ -191,3 +192,60 @@ def test_live_scan_shows_devices_as_they_appear(page, server):
     expect(page.locator("#progress-section")).to_be_visible()
     expect(page.get_by_text("192.168.0.50").first).to_be_visible(timeout=10_000)
     expect(page.get_by_text("Scan concluído")).to_be_visible(timeout=15_000)
+
+
+def test_command_palette_finds_devices_and_actions(page):
+    page.keyboard.press("Control+K")
+    box = page.locator("dialog.palette input")
+    expect(box).to_be_focused()
+    box.fill("sala")
+    expect(page.locator("dialog.palette").get_by_text("Sala").first).to_be_visible()
+    box.fill("telnet")
+    page.keyboard.press("Enter")
+    expect(page).to_have_url(re.compile(r"/fix/casa/"))
+
+
+def test_simple_mode_hides_technical_details(page, server):
+    page.goto(server[1] + "/findings/casa")
+    loc = page.locator("code.tech").first
+    expect(loc).to_be_attached()
+    page.get_by_role("button", name="Modo técnico").click()
+    expect(loc).to_be_hidden()
+    page.reload()  # lembrado entre páginas
+    expect(page.locator("code.tech").first).to_be_hidden()
+    page.get_by_role("button", name="Modo simples").click()
+
+
+def test_fix_now_checklist_and_verify(page, server):
+    page.goto(server[1] + "/")
+    page.get_by_role("link", name="Corrigir agora").first.click()
+    expect(page.get_by_role("heading", level=1)).to_contain_text("Telnet")
+    first = page.locator(".fix-steps li").first
+    first.click()
+    expect(first.locator("input")).to_be_checked()
+    page.get_by_role("button", name="Já fiz, verificar").click()
+    # o "scan" de teste devolve o mesmo resultado: o Telnet continua lá
+    expect(page.get_by_text("Ainda aparece").first).to_be_visible(timeout=15_000)
+
+
+def test_notifications_and_undo(page, server):
+    page.goto(server[1] + "/inventory/casa")
+    card = page.locator("article", has_text="192.168.0.1")
+    card.get_by_role("button", name="Aprovar").click()
+    toast = page.locator(".toast", has_text="Aparelho aprovado")
+    toast.get_by_role("button", name="Desfazer").click()
+    expect(page.locator("article", has_text="192.168.0.1").get_by_role("button", name="Aprovar")).to_be_visible()
+    page.get_by_role("button", name="Notificações").click()
+    expect(page.locator("#notif-panel")).to_be_visible()
+    expect(page.locator("#notif-panel .notif").first).to_be_visible()
+
+
+def test_device_page_approve_in_place(page, server):
+    page.goto(server[1] + "/device/casa/192.168.0.50")
+    hero = page.locator("#device")
+    if hero.get_by_role("button", name="Remover aprovação").count():
+        hero.get_by_role("button", name="Remover aprovação").click()
+        expect(hero.get_by_role("button", name="Aprovar")).to_be_visible()
+    hero = page.locator("#device")
+    hero.get_by_role("button", name="Aprovar").click()
+    expect(page.locator("#device").get_by_text("conhecido", exact=True)).to_be_visible()

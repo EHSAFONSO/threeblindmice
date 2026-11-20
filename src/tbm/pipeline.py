@@ -92,4 +92,38 @@ async def execute(job: ScanJob, store: HistoryStore, progress: ProgressHook | No
     mark_novelty(diff, result, recent)
     if job.save:
         store.save(result)
+        record_events(store, result, diff)
+        remember_network(store, result)
     return result, diff
+
+
+def remember_network(store: HistoryStore, result: ScanResult) -> None:
+    """Associa o roteador (MAC) ao rótulo: na próxima vez, a interface sabe em que rede você está."""
+    gw = result.host(result.gateway) if result.gateway else None
+    if gw is not None and gw.mac:
+        store.set_meta(f"net:{gw.mac}", result.label)
+
+
+async def current_network_label(store: HistoryStore) -> str | None:
+    """Rótulo da rede em que este computador está agora (pelo MAC do roteador), se já foi escaneada."""
+    from tbm.scout.arp import read_arp_table
+    from tbm.scout.discovery import default_gateway
+
+    gw = await default_gateway()
+    if not gw:
+        return None
+    mac = (await read_arp_table()).get(gw)
+    return store.meta(f"net:{mac}") if mac else None
+
+
+def record_events(store: HistoryStore, result: ScanResult, diff: ScanDiff) -> None:
+    """Notificações da interface: o que este scan trouxe de novo."""
+    label = result.label
+    store.add_event("scan_done", {"grade": result.grade, "score": result.score, "delta": diff.score_delta},
+                    label=label, link=f"/?label={label}")
+    for h in diff.alert_hosts:
+        if not h.trusted:
+            store.add_event("unknown_device", {"name": h.name or h.device_type or h.address, "address": h.address},
+                            label=label, link=f"/device/{label}/{h.address}")
+    if diff.resolved_findings:
+        store.add_event("resolved", {"n": len(diff.resolved_findings)}, label=label, link=f"/findings/{label}")

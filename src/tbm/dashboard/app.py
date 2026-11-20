@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from tbm.dashboard.security import GuiSettings
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -42,6 +42,57 @@ _env.globals["get_lang"] = i18n.get_lang
 _env.globals["js_i18n"] = i18n.js_catalog
 _env.globals["LANGS"] = i18n.LANGS
 _env.filters["dtype"] = i18n.device_type
+
+SEV_NAMES = {"critical": "crítico", "high": "alto", "medium": "médio", "low": "baixo", "info": "info",
+             "ok": "sem problemas"}
+
+
+def sev_name(value) -> str:
+    """Nome da severidade no idioma da interface (aceita Severity ou texto)."""
+    key = getattr(value, "value", value)
+    return i18n.gettext(SEV_NAMES.get(key, key))
+
+
+_env.filters["sev"] = sev_name
+
+CATEGORIES = {"familia": "Família", "visitas": "Visitas", "casa-inteligente": "Casa inteligente",
+              "trabalho": "Trabalho", "infraestrutura": "Infraestrutura"}
+_env.globals["CATEGORIES"] = CATEGORIES
+
+
+def _model_label(host) -> str | None:
+    from tbm.scout.model import model_label
+
+    return model_label(host)
+
+
+_env.globals["model_label"] = _model_label
+
+
+def mini_path(values: list[int], w: int = 300, h: int = 64) -> dict[str, str]:
+    """Curva suave (Catmull-Rom → Bézier) para os gráficos pequenos, com área preenchida."""
+    if not values:
+        return {"line": "", "area": "", "x": "0", "y": "0"}
+    if len(values) == 1:
+        values = values * 2
+    pad = 4
+    span = max(max(values) - min(values), 10)
+    mid = (max(values) + min(values)) / 2
+    lo, hi = mid - span / 2, mid + span / 2
+    pts = [(pad + (w - 2 * pad) * i / (len(values) - 1), pad + (h - 2 * pad) * (1 - (v - lo) / (hi - lo)))
+           for i, v in enumerate(values)]
+    d = f"M{pts[0][0]:.1f},{pts[0][1]:.1f}"
+    for i in range(len(pts) - 1):
+        p0, p1, p2 = pts[max(i - 1, 0)], pts[i], pts[i + 1]
+        p3 = pts[min(i + 2, len(pts) - 1)]
+        c1 = (p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)
+        c2 = (p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)
+        d += f" C{c1[0]:.1f},{c1[1]:.1f} {c2[0]:.1f},{c2[1]:.1f} {p2[0]:.1f},{p2[1]:.1f}"
+    area = d + f" L{pts[-1][0]:.1f},{h} L{pts[0][0]:.1f},{h} Z"
+    return {"line": d, "area": area, "x": f"{pts[-1][0]:.1f}", "y": f"{pts[-1][1]:.1f}", "w": str(w), "h": str(h)}
+
+
+_env.globals["mini_path"] = mini_path
 
 
 def action_guide(action, scan):
@@ -154,11 +205,48 @@ def create_app(store: HistoryStore, gui: GuiSettings | None = None,
         resp.set_cookie(i18n.COOKIE, lang, max_age=365 * 86400, samesite="strict", httponly=False)
         return resp
 
+    def nav_unknown() -> int:
+        """Aparelhos do último scan que você ainda não aprovou (selo no menu)."""
+        label = latest_label()
+        scan = store.latest(label) if label else None
+        return sum(1 for h in scan.hosts if not h.trusted) if scan else 0
+
     def render(name: str, **ctx) -> HTMLResponse:
         nav = [r["label"] for r in store.labels()]
         return HTMLResponse(_env.get_template(name).render(
-            version=__version__, nav_labels=nav, gui=gui is not None,
+            version=__version__, nav_labels=nav, gui=gui is not None, nav_unknown=nav_unknown,
             csrf_token=gui.token if gui else "", **ctx))
+
+    @app.get("/api/search")
+    def search(q: str = "") -> JSONResponse:
+        """Itens para a busca Ctrl+K: páginas, aparelhos e ações (filtrados no navegador)."""
+        items: list[dict] = []
+        pages = [("/", "gauge", "Visão geral"), ("/findings", "list", "Achados"), ("/map", "map", "Mapa"),
+                 ("/inventory", "grid", "Dispositivos")]
+        if gui is not None:
+            pages += [("/scan", "plus", "Novo scan"), ("/alerts", "bell", "Alertas"), ("/watch", "eye", "Vigia"),
+                      ("/features", "book", "Funcionalidades")]
+        for href, icon, text in pages:
+            items.append({"group": i18n.gettext("Páginas"), "title": i18n.gettext(text), "href": href,
+                          "icon": icon, "sub": ""})
+        for row in store.labels():
+            scan = store.latest(row["label"])
+            if scan is None:
+                continue
+            label = scan.label
+            for h in scan.hosts:
+                sub = " · ".join(x for x in (h.address, h.mac, h.vendor, i18n.device_type(h.device_type)) if x)
+                title = h.name or i18n.device_type(h.device_type) or h.address
+                keys = " ".join(x for x in (h.hostname, h.device_name) if x)
+                items.append({"group": i18n.gettext("Dispositivos"), "title": title, "sub": sub, "keys": keys,
+                              "href": f"/device/{label}/{h.address}", "icon": device_icon(h.device_type)})
+            from tbm.squeak.actions import build_actions
+
+            for a in build_actions(scan):
+                items.append({"group": i18n.gettext("Ações"), "title": action_title(a), "sub": label,
+                              "href": f"/fix/{label}/{a.key}", "icon": "tool",
+                              "keys": " ".join(f.title for f in a.findings)})
+        return JSONResponse({"items": items[:500]})
 
     def latest_label() -> str | None:
         labels = store.labels()
@@ -199,6 +287,18 @@ def create_app(store: HistoryStore, gui: GuiSettings | None = None,
             raise HTTPException(404, "dispositivo não encontrado")
         return render("device.html.j2", **data)
 
+    @app.get("/device/{label}/{address}", response_class=HTMLResponse)
+    def device_page(label: str, address: str) -> HTMLResponse:
+        from tbm.dashboard.views import device_history
+        from tbm.squeak.actions import impacts
+
+        data = device_detail(store, label, address)
+        if data is None:
+            raise HTTPException(404, "dispositivo não encontrado")
+        history = device_history(store, label, data["host"].identity)
+        return render("device_page.html.j2", **data, history=history,
+                      impact=impacts(data["scan"], data["actions"]))
+
     @app.get("/scan/{scan_id}", response_class=HTMLResponse)
     def scan_report(scan_id: str) -> HTMLResponse:
         try:
@@ -230,11 +330,42 @@ def create_app(store: HistoryStore, gui: GuiSettings | None = None,
         scan = store.latest(label)
         if scan is None:
             raise HTTPException(404, "rótulo sem scans")
-        return render("map.html.j2", label=label, scan=scan, m=network_map(scan))
+        from tbm.dashboard.views import offline_hosts
+
+        return render("map.html.j2", label=label, scan=scan, m=network_map(scan, offline_hosts(store, label, scan)))
 
     @app.get("/api/scans")
     def api_scans(label: str | None = None, limit: int = 50) -> JSONResponse:
         return JSONResponse([dict(r) for r in store.list(label, min(limit, 500))])
+
+    @app.get("/report/{label}", response_class=HTMLResponse)
+    def family_report(label: str) -> HTMLResponse:
+        data = health(store, label)
+        if data is None:
+            raise HTTPException(404, "rótulo sem scans")
+        return render("family.html.j2", h=data, now=ScanResult().started_at)
+
+    @app.get("/compare/{label}", response_class=HTMLResponse)
+    def compare(label: str) -> HTMLResponse:
+        rows = store.list(label, 60)
+        if len(rows) < 2:
+            raise HTTPException(404, "precisa de pelo menos dois scans")
+        return render("compare.html.j2", label=label, rows=rows)
+
+    @app.get("/partials/compare/{a}/{b}", response_class=HTMLResponse)
+    def compare_pair(a: str, b: str) -> HTMLResponse:
+        old, new = store.get(a), store.get(b)
+        if old is None or new is None:
+            raise HTTPException(404, "scan não encontrado")
+        if old.started_at > new.started_at:
+            old, new = new, old
+        return render("compare_pair.html.j2", old=old, new=new, d=diff_scans(old, new))
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        from tbm.dashboard.metrics import render_metrics
+
+        return Response(render_metrics(store), media_type="text/plain; version=0.0.4")
 
     if gui is not None:
         from tbm.dashboard.gui import install_gui

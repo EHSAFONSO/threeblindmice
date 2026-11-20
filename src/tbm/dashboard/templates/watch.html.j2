@@ -1,72 +1,69 @@
 {% extends "base.html.j2" %}
-{% block title %}Vigia · threeblindmice{% endblock %}
+{% block title %}{{ _("Vigia") }} · threeblindmice{% endblock %}
 {% block content %}
-{% if get_lang() == "en" %}<div class="banner" style="margin-bottom:14px" role="note">This page is only available in Portuguese for now.</div>{% endif %}
 <style>
-  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-  .grid2 > div { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .big { font-size: 20px; font-weight: 700; }
-  pre.log { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 320px;
+  pre.log { background: var(--panel-2); border: 1px solid var(--line); border-radius: 11px; padding: 12px; max-height: 340px;
             overflow: auto; font-size: 12px; white-space: pre-wrap; }
-  label.field { display: block; font-weight: 600; margin: 12px 0 4px; }
 </style>
 
-<section class="card" style="margin-top:18px">
-  <h2>Vigia automático · {{ label }}</h2>
-  <p class="hint">O vigia roda um scan sozinho de tempos em tempos, pelo agendador do sistema
-    ({{ "Agendador de Tarefas do Windows, sem abrir janela" if platform == "win32" else "systemd ou cron" }}),
-    e avisa você só quando aparece algo inédito. O computador precisa estar ligado nos horários.</p>
+<h1>{{ _("Vigia automático") }} · {{ label }}</h1>
+<p class="muted" style="margin:6px 0 18px">
+  {% if platform == "win32" %}{{ _("O vigia roda um scan sozinho de tempos em tempos, pelo Agendador de Tarefas do Windows (sem abrir janela), e avisa você só quando aparece algo inédito. O computador precisa estar ligado nos horários.") }}
+  {% else %}{{ _("O vigia roda um scan sozinho de tempos em tempos, pelo systemd ou cron, e avisa você só quando aparece algo inédito. O computador precisa estar ligado nos horários.") }}{% endif %}</p>
 
-  <div class="grid2">
-    <div><span class="label">Situação</span><br>
-      {% if not st.supported %}<span class="big">—</span><br><span class="hint">use o cron (veja abaixo)</span>
-      {% elif st.installed %}<span class="big ok">Ativo</span>{% if st.state %}<br><span class="hint">{{ st.state }}</span>{% endif %}
-      {% else %}<span class="big">Desligado</span>{% endif %}</div>
-    <div><span class="label">Próxima execução</span><br><span class="big">{{ st.next.strftime("%d/%m %H:%M") if st.next else "—" }}</span></div>
-    <div><span class="label">Última execução</span><br><span class="big">{{ st.last.strftime("%d/%m %H:%M") if st.last else "—" }}</span>
-      {% if st.result is not none and st.last %}<br><span class="hint">{{ "concluída" if st.result in (0, 1) else "código " ~ st.result }}</span>{% endif %}</div>
-    <div><span class="label">Último scan no histórico</span><br>
-      <span class="big">{{ last.started_at.astimezone().strftime("%d/%m %H:%M") if last else "—" }}</span>
-      {% if last %}<br><span class="hint">nota {{ last.grade }} {{ last.score }}/100</span>{% endif %}</div>
-    <div><span class="label">Alertas</span><br><span class="big">{{ "Ligados" if notify.kind != "none" else "Desligados" }}</span>
-      <br><a href="/alerts" class="hint">{{ notify.label if notify.kind != "none" else "configurar →" }}</a></div>
+<section class="card reveal">
+  <div class="kpis" style="margin-top:0">
+    <div class="kpi"><div class="label">{{ _("Situação") }}</div>
+      {% if not st.supported %}<div class="value">—</div><div class="sub">{{ _("use o cron (veja abaixo)") }}</div>
+      {% elif st.installed %}<div class="value" style="color:var(--good)">{{ _("Ativo") }}</div>{% if st.state %}<div class="sub">{{ st.state }}</div>{% endif %}
+      {% else %}<div class="value">{{ _("Desligado") }}</div>{% endif %}</div>
+    <div class="kpi"><div class="label">{{ _("Próxima execução") }}</div><div class="value">{{ st.next.strftime("%d/%m %H:%M") if st.next else "—" }}</div></div>
+    <div class="kpi"><div class="label">{{ _("Última execução") }}</div><div class="value">{{ st.last.strftime("%d/%m %H:%M") if st.last else "—" }}</div>
+      {% if st.result is not none and st.last %}<div class="sub">{{ _("concluída") if st.result in (0, 1) else _("código {c}", c=st.result) }}</div>{% endif %}</div>
+    <div class="kpi"><div class="label">{{ _("Último scan no histórico") }}</div>
+      <div class="value">{{ last.started_at.astimezone().strftime("%d/%m %H:%M") if last else "—" }}</div>
+      {% if last %}<div class="sub">{{ _("nota") }} {{ last.grade }} {{ last.score }}/100</div>{% endif %}</div>
+    <div class="kpi"><div class="label">{{ _("Alertas") }}</div><div class="value">{{ _("Ligados") if notify.kind != "none" else _("Desligados") }}</div>
+      <a href="/alerts" class="sub">{{ notify.label if notify.kind != "none" else _("configurar →") }}</a></div>
   </div>
-
   {% if st.installed %}
-  <p style="margin-top:14px">
-    {% if platform == "win32" %}<button class="btn ghost" id="run-now">Executar agora</button>{% endif %}
-    <button class="btn ghost" id="remove">Desligar vigia</button>
+  <div class="row" style="margin-top:16px">
+    {% if platform == "win32" %}<button class="btn sm" id="run-now" type="button"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>{{ _("Executar agora") }}</button>{% endif %}
+    <button class="btn sm danger" id="remove" type="button">{{ _("Desligar vigia") }}</button>
     <span id="msg-top" class="hint"></span>
-  </p>
+  </div>
   {% endif %}
 </section>
 
-<section class="card">
-  <h2>{{ "Alterar o vigia" if st.installed else "Ligar o vigia" }}</h2>
-  {% if notify.kind == "none" %}<p class="error" style="font-weight:400">Os alertas estão desligados: o vigia vai escanear,
-    mas não vai avisar você. <a href="/alerts">Configure os alertas</a> primeiro.</p>{% endif %}
-  <label class="field" for="targets">O que vigiar</label>
-  <input type="text" id="targets" value="{{ suggested }}" size="30">
-  <label class="field" for="label">Nome do histórico</label>
-  <input type="text" id="label" value="{{ label }}" size="20">
-  <label class="field" for="hours">Frequência</label>
-  <select id="hours">
-    <option value="1">a cada 1 hora</option><option value="3">a cada 3 horas</option>
-    <option value="6" selected>a cada 6 horas (recomendado)</option>
-    <option value="12">a cada 12 horas</option><option value="24">uma vez por dia</option>
-  </select>
-  <p><label><input type="checkbox" id="udp" checked> testar serviços UDP</label>
-     <label style="margin-left:14px"><input type="checkbox" id="gentle"> modo cuidadoso</label></p>
-  <p class="hint">Os testes ativos ficam sempre de fora do vigia, para ele não gerar tentativas de login nos aparelhos
-    a cada poucas horas.</p>
-  <button class="btn" id="install">{{ "Salvar alterações" if st.installed else "Ligar vigia" }}</button>
-  <span id="msg" class="hint"></span>
+<section class="card" style="margin-top:16px">
+  <h2>{{ _("Alterar o vigia") if st.installed else _("Ligar o vigia") }}</h2>
+  {% if notify.kind == "none" %}<div class="banner warn" style="margin-bottom:12px"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+    <div>{{ _("Os alertas estão desligados: o vigia vai escanear, mas não vai avisar você.") }} <a href="/alerts">{{ _("Configure os alertas") }}</a>.</div></div>{% endif %}
+  <div class="grid cols-3">
+    <div><label class="field" for="targets">{{ _("O que vigiar") }}</label><input type="text" id="targets" value="{{ suggested }}" style="width:100%"></div>
+    <div><label class="field" for="label">{{ _("Nome do histórico") }}</label><input type="text" id="label" value="{{ label }}" style="width:100%"></div>
+    <div><label class="field" for="hours">{{ _("Frequência") }}</label>
+      <select id="hours" style="width:100%">
+        <option value="1">{{ _("a cada 1 hora") }}</option><option value="3">{{ _("a cada 3 horas") }}</option>
+        <option value="6" selected>{{ _("a cada 6 horas (recomendado)") }}</option>
+        <option value="12">{{ _("a cada 12 horas") }}</option><option value="24">{{ _("uma vez por dia") }}</option>
+      </select></div>
+  </div>
+  <label class="check"><input type="checkbox" id="udp" checked><span><b>{{ _("Testar serviços UDP") }}</b></span></label>
+  <label class="check"><input type="checkbox" id="gentle"><span><b>{{ _("Modo cuidadoso") }}</b></span></label>
+  <p class="hint">{{ _("Os testes ativos ficam sempre de fora do vigia, para ele não gerar tentativas de login nos aparelhos a cada poucas horas.") }}</p>
+  {% if autostart_ok %}
+  <label class="check" style="border-top:1px solid var(--line);margin-top:8px"><input type="checkbox" id="autostart" {% if autostart_on %}checked{% endif %}>
+    <span><b>{{ _("Iniciar com o sistema (vigia em tempo real)") }}</b><span class="hint">{{ _("Abre o app minimizado na bandeja ao ligar o computador. Ele passa a avisar na hora quando um aparelho novo entra na rede, sem esperar o próximo scan.") }}</span></span></label>
+  {% endif %}
+  <div class="row"><button class="btn" id="install" type="button">{{ _("Salvar alterações") if st.installed else _("Ligar vigia") }}</button>
+    <span id="msg" class="hint"></span></div>
   <pre id="manual" class="log" hidden></pre>
 </section>
 
 {% if log %}
-<section class="card">
-  <h2>Saída das últimas execuções</h2>
+<section class="card tech" style="margin-top:16px">
+  <h2>{{ _("Saída das últimas execuções") }}</h2>
   <pre class="log">{{ log }}</pre>
 </section>
 {% endif %}
@@ -74,27 +71,34 @@
 <script>
 const $ = id => document.getElementById(id);
 const label = {{ label | tojson }};
+const T = {{ {"configuring": _("Configurando o agendador…"), "manual": _("Neste sistema, adicione manualmente:"),
+             "on": _("Vigia ligado:"), "offTitle": _("Desligar o vigia?"), "offText": _("Os scans automáticos param até você ligar de novo."),
+             "off": _("Desligar"), "started": _("Iniciado em segundo plano. Recarregue em ~30s para ver o resultado.")} | tojson }};
 function say(el, text, ok) { el.textContent = text; el.className = ok === undefined ? "hint" : (ok ? "ok" : "error"); }
 
 $("install").addEventListener("click", async () => {
-  $("install").disabled = true; say($("msg"), "Configurando o agendador…");
+  $("install").disabled = true; say($("msg"), T.configuring);
   try {
     const r = await tbmPost("/api/watch/install", {targets: $("targets").value, label: $("label").value,
       hours: +$("hours").value, udp: $("udp").checked, gentle: $("gentle").checked});
-    if (r.manual) { $("manual").hidden = false; $("manual").textContent = r.manual; say($("msg"), "Neste sistema, adicione manualmente:"); }
-    else { say($("msg"), "Vigia ligado: " + r.description + ". " + (r.warnings || []).join(" "), true);
+    if (r.manual) { $("manual").hidden = false; $("manual").textContent = r.manual; say($("msg"), T.manual); }
+    else { say($("msg"), T.on + " " + r.description + ". " + (r.warnings || []).join(" "), true);
            setTimeout(() => location.href = "/watch?label=" + encodeURIComponent($("label").value), 1500); }
   } catch (e) { say($("msg"), e.message, false); }
   $("install").disabled = false;
 });
 $("remove")?.addEventListener("click", async () => {
-  if (!await tbmConfirm("Desligar o vigia?", "Os scans automáticos param até você ligar de novo.", "Desligar", true)) return;
+  if (!await tbmConfirm(T.offTitle, T.offText, T.off, true)) return;
   try { await tbmPost("/api/watch/remove", {label}); location.reload(); }
   catch (e) { say($("msg-top"), e.message, false); }
 });
+$("autostart")?.addEventListener("change", async e => {
+  try { await tbmPost("/api/watch/autostart", {enabled: e.target.checked});
+        tbmToast(e.target.checked ? {{ _("Vai iniciar com o sistema") | tojson }} : {{ _("Não inicia mais com o sistema") | tojson }}, "ok"); }
+  catch (err) { e.target.checked = !e.target.checked; tbmToast(err.message, "error"); }
+});
 $("run-now")?.addEventListener("click", async () => {
-  try { await tbmPost("/api/watch/run-now", {label});
-        say($("msg-top"), "Iniciado em segundo plano. Recarregue em ~30s para ver o resultado.", true); }
+  try { await tbmPost("/api/watch/run-now", {label}); say($("msg-top"), T.started, true); }
   catch (e) { say($("msg-top"), e.message, false); }
 });
 </script>

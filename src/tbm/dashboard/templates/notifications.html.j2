@@ -1,0 +1,20 @@
+<header><b>{{ _("Notificações") }}</b><span class="spacer"></span>
+  <button class="icon-btn" type="button" onclick="tbmNotifications()" aria-label="{{ _('Fechar') }}"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></header>
+{% for e in events %}{% set d = e.data %}
+<a class="notif{% if not e.read %} unread{% endif %}" href="{{ e.link or '/' }}">
+  {% if e.kind == "unknown_device" %}<svg class="icon" aria-hidden="true" style="color:var(--high)"><use href="#i-alert"/></svg>
+  <div><b>{{ _("Aparelho desconhecido na rede") }}</b><div>{{ d.name }} · <span class="mono">{{ d.address }}</span></div>
+  {% elif e.kind == "resolved" %}<svg class="icon" aria-hidden="true" style="color:var(--good)"><use href="#i-shield-check"/></svg>
+  <div><b>{{ _("{n} problema(s) resolvido(s)", n=d.n) }}</b>
+  {% elif e.kind == "verify" %}<svg class="icon" aria-hidden="true" style="color:var(--accent)"><use href="#i-wrench"/></svg>
+  <div><b>{{ _("Verificação: {a} resolvido(s), {b} pendente(s)", a=d.resolved, b=d.remaining) }}</b><div>{{ _("nota") }} {{ d.grade }} · {{ d.score }}/100</div>
+  {% elif e.kind == "alert_sent" %}<svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg>
+  <div><b>{{ _("Alerta enviado") }}</b>
+  {% else %}<svg class="icon" aria-hidden="true"><use href="#i-radar"/></svg>
+  <div><b>{{ _("Scan concluído: nota {g} ({s}/100)", g=d.grade, s=d.score) }}</b>{% if d.delta %}<div>{{ _("{d} desde o scan anterior", d="%+d" | format(d.delta)) }}</div>{% endif %}
+  {% endif %}
+    <div class="when">{{ e.label or "" }} · {{ e.at | when }}</div></div>
+</a>
+{% else %}
+<div class="empty" style="padding:24px">{{ _("Nenhuma notificação ainda.") }}</div>
+{% endfor %}

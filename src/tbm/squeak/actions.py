@@ -64,6 +64,12 @@ KINDS: dict[str, FixKind] = {k.key: k for k in (
             "DNS adulterado manda você para sites falsos mesmo digitando o endereço certo.", isp=True),
     FixKind("exposure", "Fechar o que a internet vê em {dev}",
             "Portas visíveis da internet são varridas por robôs o tempo todo.", isp=True),
+    FixKind("camera", "Proteger o vídeo da {dev}",
+            "Câmera sem senha deixa qualquer um assistir ao vivo, de dentro ou de fora da rede."),
+    FixKind("mqtt", "Exigir senha no MQTT de {dev}",
+            "Sem senha, qualquer um na rede lê o estado da casa inteligente e manda comandos."),
+    FixKind("password", "Conferir a senha de administração de {dev}",
+            "Senha de fábrica é pública e é um dos primeiros alvos numa rede doméstica."),
 )}
 
 _PORT_KIND = {23: "telnet", 21: "ftp", 3389: "remote", 5900: "remote", 445: "smb", 139: "smb", 7547: "tr069",
@@ -108,6 +114,12 @@ def classify(f: Finding) -> str | None:
         return "dns"
     if cid == "network.external":
         return "exposure"
+    if cid == "iot.rtsp":
+        return "camera"
+    if cid == "iot.mqtt":
+        return "mqtt"
+    if cid == "network.default-pass":
+        return "password"
     return None
 
 
@@ -189,6 +201,27 @@ def build_actions(scan: ScanResult, include_info: bool = False) -> list[Action]:
         (action.accepted if f.accepted else action.findings).append(f)
     actions = [a for a in groups.values() if a.findings]
     return sorted(actions, key=lambda a: (-a.priority, -a.severity.rank, a.title))
+
+
+@dataclass
+class Projection:
+    score: int
+    grade: str
+    gain: int
+
+
+def project(scan: ScanResult, actions: Iterable[Action]) -> Projection:
+    """Nota que o scan teria sem os achados destas ações (o que acontece se você fizer todas)."""
+    from tbm.squeak.scoring import grade_for, score_findings
+
+    gone = {f.fingerprint for a in actions for f in a.findings}
+    score = score_findings([f for f in scan.findings if f.fingerprint not in gone])
+    return Projection(score=score, grade=grade_for(score), gain=score - (scan.score or 0))
+
+
+def impacts(scan: ScanResult, actions: list[Action]) -> dict[str, int]:
+    """Quantos pontos cada ação, sozinha, soma à nota."""
+    return {a.key: project(scan, [a]).gain for a in actions}
 
 
 def accepted_only(scan: ScanResult) -> list[Action]:

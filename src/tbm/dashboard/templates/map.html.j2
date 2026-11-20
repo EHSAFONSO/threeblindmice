@@ -1,17 +1,33 @@
 {% extends "base.html.j2" %}
 {% block title %}{{ _("Mapa da rede") }} · {{ label }}{% endblock %}
 {% block content %}
-<div class="row" style="margin-bottom:12px">
-  <h1 style="font-size:22px">{{ _("Mapa da rede") }} · {{ label }}</h1><span class="spacer"></span>
+<div class="row" style="margin-bottom:6px">
+  <h1>{{ _("Mapa da rede") }} · {{ label }}</h1><span class="spacer"></span>
   <span class="hint">{{ _("scan de {t} · clique num aparelho para ver os detalhes", t=scan.started_at.astimezone().strftime("%d/%m %H:%M")) }}</span>
 </div>
-{% for n in m.notes %}<div class="banner warn" style="margin-bottom:10px"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><div>{{ _(n.text, **n.args) }}</div></div>{% endfor %}
-<div class="card" style="padding:12px">
-  <svg class="netmap" viewBox="0 0 {{ m.width }} {{ m.height }}" role="img" aria-label="{{ _("Mapa com {n} dispositivos", n=m.nodes | length - 1) }}">
+{% for n in m.notes %}<div class="banner warn" style="margin:10px 0"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><div>{{ _(n.text, **n.args) }}</div></div>{% endfor %}
+<div class="chips" role="toolbar" aria-label="{{ _('Filtrar') }}" id="map-filters" style="margin:12px 0">
+  <button type="button" data-filter="all" aria-pressed="true">{{ _("Todos") }}</button>
+  <button type="button" data-filter="pending" aria-pressed="false">{{ _("Não aprovados") }}</button>
+  <button type="button" data-filter="problems" aria-pressed="false">{{ _("Com problemas") }}</button>
+  {% for k, name in CATEGORIES.items() %}{% if m.nodes | selectattr("category", "defined") | selectattr("category", "equalto", k) | list %}
+  <button type="button" data-filter="cat:{{ k }}" aria-pressed="false">{{ _(name) }}</button>{% endif %}{% endfor %}
+</div>
+<div class="card map-wrap" style="padding:0" id="map-wrap">
+  <div class="map-tools">
+    <button class="icon-btn" type="button" data-zoom="1.25" aria-label="{{ _('Aproximar') }}"><svg class="icon" aria-hidden="true"><use href="#i-zoom-in"/></svg></button>
+    <button class="icon-btn" type="button" data-zoom="0.8" aria-label="{{ _('Afastar') }}"><svg class="icon" aria-hidden="true"><use href="#i-zoom-out"/></svg></button>
+    <button class="icon-btn" type="button" data-zoom="reset" aria-label="{{ _('Ajustar à tela') }}"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+  </div>
+  <svg class="netmap" id="netmap" viewBox="0 0 {{ m.width }} {{ m.height }}" data-w="{{ m.width }}" data-h="{{ m.height }}" role="img"
+       aria-label="{{ _('Mapa com {n} dispositivos', n=m.nodes | length - 1) }}" style="padding:12px">
     {% for e in m.edges %}<line x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}" class="edge{% if e.dashed %} dashed{% endif %}"/>{% endfor %}
+    {% if m.offline_y %}<text x="24" y="{{ m.offline_y }}" class="axis" style="fill:var(--muted);font-size:12px">{{ _("Fora da rede agora (vistos nos últimos scans)") }}</text>{% endif %}
     {% for n in m.nodes %}
-    <g class="node" transform="translate({{ n.x }},{{ n.y }})"
-       {% if n.address %}tabindex="0" role="button" aria-label="{{ n.label }}, {{ n.sub }}"
+    <g class="node{% if n.address and gui and not n.trusted and n.role != 'offline' %} unknown{% endif %}{% if n.role == 'offline' %} offline{% endif %}"
+       transform="translate({{ n.x }},{{ n.y }})" data-trusted="{{ (n.trusted or not n.address) | lower }}"
+       data-problems="{{ (n.sev not in ('ok', 'none')) | lower }}" data-category="{{ n.category or '' }}"
+       {% if n.address %}tabindex="0" role="button" aria-label="{{ n.label }}, {{ n.sub }}{% if n.role == 'offline' %} ({{ _('fora da rede') }}){% endif %}"
        data-drawer="/partials/device/{{ label | urlencode }}/{{ n.address }}" data-tip="{{ n.tip }}"{% endif %}>
       <circle class="bg ring-{{ n.sev }}" r="{{ 36 if n.role in ('gateway', 'router') or not n.address else 30 }}"/>
       <svg x="-14" y="-14" width="28" height="28" viewBox="0 0 24 24" class="icon"><use href="#i-{{ n.icon }}"/></svg>
@@ -26,5 +42,48 @@
   {% for s, name in [("critical", "crítico"), ("high", "alto"), ("medium", "médio"), ("low", "baixo"), ("ok", "sem problemas")] %}
   <span class="row" style="gap:6px"><span class="dot {{ s }}"></span><span class="hint">{{ _(name) }} ({{ m.legend[s] }})</span></span>
   {% endfor %}
+  {% if gui %}<span class="hint">· {{ _("pulsando = não aprovado") }}</span>{% endif %}
 </div>
+<script>
+(() => {
+  const svg = document.getElementById("netmap"), wrap = document.getElementById("map-wrap");
+  const W = +svg.dataset.w, H = +svg.dataset.h;
+  let vb = { x: 0, y: 0, w: W, h: H };
+  const apply = () => svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  const zoom = (k, cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2) => {
+    const w = Math.min(Math.max(vb.w / k, W / 4), W * 1.5), h = w * H / W;
+    vb = { x: cx - (cx - vb.x) * (w / vb.w), y: cy - (cy - vb.y) * (h / vb.h), w, h }; apply();
+  };
+  wrap.querySelectorAll("[data-zoom]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    if (b.dataset.zoom === "reset") { vb = { x: 0, y: 0, w: W, h: H }; apply(); } else zoom(+b.dataset.zoom);
+  }));
+  wrap.addEventListener("wheel", e => {
+    if (!e.ctrlKey && !e.metaKey) return;  // rolar a página continua funcionando; Ctrl+roda dá zoom
+    e.preventDefault();
+    const r = svg.getBoundingClientRect();
+    zoom(e.deltaY < 0 ? 1.15 : 0.87, vb.x + (e.clientX - r.left) / r.width * vb.w, vb.y + (e.clientY - r.top) / r.height * vb.h);
+  }, { passive: false });
+  let drag = null, moved = false;
+  wrap.addEventListener("pointerdown", e => { if (e.target.closest(".node, button")) return; drag = { x: e.clientX, y: e.clientY, vb: { ...vb } }; moved = false; wrap.classList.add("dragging"); });
+  window.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const r = svg.getBoundingClientRect(), dx = (e.clientX - drag.x) / r.width * vb.w, dy = (e.clientY - drag.y) / r.height * vb.h;
+    if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+    vb = { ...vb, x: drag.vb.x - dx, y: drag.vb.y - dy }; apply();
+  });
+  window.addEventListener("pointerup", () => { drag = null; wrap.classList.remove("dragging"); });
+  const bar = document.getElementById("map-filters");
+  bar.addEventListener("click", e => {
+    const b = e.target.closest("[data-filter]"); if (!b) return;
+    bar.querySelectorAll("[data-filter]").forEach(x => x.setAttribute("aria-pressed", x === b));
+    const f = b.dataset.filter;
+    svg.querySelectorAll(".node[data-drawer]").forEach(n => {
+      const show = f === "all" || (f === "pending" && n.dataset.trusted === "false") || (f === "problems" && n.dataset.problems === "true")
+                   || (f.startsWith("cat:") && n.dataset.category === f.slice(4));
+      n.classList.toggle("dim", !show);
+    });
+  });
+})();
+</script>
 {% endblock %}

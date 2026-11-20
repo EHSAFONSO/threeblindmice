@@ -32,7 +32,7 @@ from tbm.pipeline import ScanJob, execute
 from tbm.scope import Scope, ScopeError
 from tbm.scout import ScoutOptions, parse_ports
 from tbm.sniffer import SnifferOptions
-from tbm.squeak import HistoryStore, ScanDiff, send_webhook, write_report
+from tbm.squeak import HistoryStore, ScanDiff, diff_scans, send_webhook, write_report
 
 
 class ScanParams(BaseModel):
@@ -136,6 +136,38 @@ class BusyError(RuntimeError):
     pass
 
 
+def merge_host(latest: ScanResult, partial: ScanResult, address: str) -> ScanResult:
+    """O último scan da rede, com o aparelho `address` trocado pelo resultado da verificação.
+
+    Os outros aparelhos e os achados da rede como um todo (Wi-Fi, IPv6, DNS) ficam
+    como estavam: a verificação só olhou um aparelho, então só ele muda.
+    """
+    import ipaddress
+    import uuid as _uuid
+
+    from tbm.pipeline import finalize
+
+    merged = latest.model_copy(deep=True)
+    merged.scan_id = _uuid.uuid4().hex[:12]
+    merged.started_at = utcnow()
+    hosts = [h for h in merged.hosts if h.address != address]
+    if (fresh := partial.host(address)) is not None:
+        hosts.append(fresh)
+
+    def order(h):
+        try:
+            return (0, int(ipaddress.ip_address(h.address)))
+        except ValueError:
+            return (1, 0)
+
+    merged.hosts = sorted(hosts, key=order)
+    network = ("network.",)
+    kept = [f for f in merged.findings if f.host != address or f.check_id.startswith(network)]
+    merged.findings = kept + [f for f in partial.findings if f.host == address and not f.check_id.startswith(network)]
+    merged.errors = partial.errors
+    return finalize(merged)
+
+
 class JobRunner:
     def __init__(self, store: HistoryStore, executor: Executor = execute,
                  on_done: Callable[[Job], None] | None = None) -> None:
@@ -160,6 +192,54 @@ class JobRunner:
             self._current = job.id
         threading.Thread(target=self._run, args=(job, spec), daemon=True, name=f"tbm-scan-{job.id}").start()
         return job
+
+    def submit_verify(self, label: str, address: str, fingerprints: list[str]) -> Job:
+        """Re-escaneia só um aparelho e confere se os achados de uma ação sumiram."""
+        params = ScanParams(targets=address, label=label)
+        spec = build_scan_job(params)
+        spec.save = False
+        with self._lock:
+            if self._current and self.jobs[self._current].status in ("queued", "running"):
+                raise BusyError("já existe um scan em andamento")
+            job = Job(id=uuid.uuid4().hex[:10], params=params)
+            self.jobs[job.id] = job
+            self._current = job.id
+        threading.Thread(target=self._run_verify, args=(job, spec, label, address, fingerprints), daemon=True,
+                         name=f"tbm-verify-{job.id}").start()
+        return job
+
+    def _run_verify(self, job: Job, spec: ScanJob, label: str, address: str, fingerprints: list[str]) -> None:
+        loop: asyncio.AbstractEventLoop
+        if sys.platform == "win32":
+            loop = asyncio.ProactorEventLoop()
+        else:
+            loop = asyncio.new_event_loop()
+        job.status = "running"
+        try:
+            before = self.store.latest(label)
+            partial, _ = loop.run_until_complete(self.executor(spec, self.store, JobProgress(job)))
+            if before is None:
+                raise RuntimeError("não há scan anterior para comparar")
+            merged = merge_host(before, partial, address)
+            self.store.save(merged)
+            still = {f.fingerprint for f in merged.findings if not f.accepted}
+            wanted = [f for f in before.findings if f.fingerprint in set(fingerprints)]
+            verify = {
+                "resolved": [f.title for f in wanted if f.fingerprint not in still],
+                "remaining": [f.title for f in wanted if f.fingerprint in still],
+                "before": {"score": before.score, "grade": before.grade},
+                "after": {"score": merged.score, "grade": merged.grade},
+            }
+            self.store.add_event("verify", {"resolved": len(verify["resolved"]), "remaining": len(verify["remaining"]),
+                                            "grade": merged.grade, "score": merged.score},
+                                 label=label, link=f"/findings/{label}")
+            job.summary = {**summarize(merged, diff_scans(before, merged), None, None), "verify": verify}
+            job.status = "done"
+        except Exception as exc:  # noqa: BLE001
+            job.status, job.error = "error", f"{exc.__class__.__name__}: {exc}"
+        finally:
+            job.finished = utcnow()
+            loop.close()
 
     def _run(self, job: Job, spec: ScanJob) -> None:
         # `if` em vez de ternário: o mypy só entende checagem de plataforma em
@@ -203,7 +283,7 @@ class JobRunner:
                     pass
 
 
-def summarize(result: ScanResult, diff: ScanDiff, report: Path, alerted: bool | None) -> dict[str, Any]:
+def summarize(result: ScanResult, diff: ScanDiff, report: Path | None, alerted: bool | None) -> dict[str, Any]:
     counts = {s.value: n for s, n in result.severity_counts().items()}
     return {
         "scan_id": result.scan_id, "label": result.label, "score": result.score, "grade": result.grade,
@@ -212,5 +292,5 @@ def summarize(result: ScanResult, diff: ScanDiff, report: Path, alerted: bool | 
         "new_findings": len(diff.new_findings), "resolved": len(diff.resolved_findings),
         "new_devices": [h.display for h in diff.alert_hosts],
         "previous": diff.previous_id, "score_delta": diff.score_delta,
-        "report": str(report), "alerted": alerted,
+        "report": str(report) if report else None, "alerted": alerted,
     }

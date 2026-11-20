@@ -105,6 +105,8 @@ class Host(BaseModel):
     # Do cadastro de aparelhos conhecidos (tbm devices / interface), não da rede:
     alias: str | None = None  # nome que você deu ("TV da sala")
     trusted: bool = False  # você aprovou: aparelho conhecido da casa
+    category: str | None = None  # familia, visitas, casa-inteligente, trabalho, infraestrutura
+    note: str | None = None  # anotação livre
     services: list[Service] = Field(default_factory=list)
 
     def service(self, port: int, transport: str = "tcp") -> Service | None:

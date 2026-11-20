@@ -12,11 +12,15 @@
         <input type="text" id="targets" value="{{ suggested }}" style="width:100%" required aria-describedby="targets-hint">
         <div class="hint" id="targets-hint">{{ _("Detectamos a sua rede como {net}.", net=suggested) }}
           {{ _("Também aceita um IP, uma faixa (192.168.0.10-50) ou vários, separados por vírgula.") }}</div>
+        {% if networks | length > 1 %}<div class="chips" style="margin-top:8px" aria-label="{{ _('Outras redes deste computador') }}">
+          {% for n in networks %}<button type="button" class="net-chip" data-net="{{ n }}">{{ n }}</button>{% endfor %}
+        </div><div class="hint">{{ _("Este computador está em mais de uma rede (cabo, Wi-Fi, rede de convidados ou máquina virtual). Toque para escolher.") }}</div>{% endif %}
       </div>
       <div>
         <label class="field" for="label">{{ _("Nome do histórico") }}</label>
         <input type="text" id="label" value="{{ label }}" style="width:100%" required aria-describedby="label-hint">
-        <div class="hint" id="label-hint">{{ _("Scans com o mesmo nome são comparados entre si.") }}</div>
+        <div class="hint" id="label-hint">{{ _("Scans com o mesmo nome são comparados entre si.") }}
+          {% if known_network %}<b>{{ _("Você está na rede {l}.", l=known_network) }}</b>{% endif %}</div>
       </div>
       <div>
         <label class="field" for="ports">{{ _("Portas") }}</label>
@@ -54,7 +58,7 @@
   </ol>
   <div class="card">
     <div class="row" style="gap:24px;align-items:center">
-      <div class="radar" id="radar" aria-hidden="true"></div>
+      <div id="radar" class="scan-mascot" aria-hidden="true">{% set sniff = True %}{% include "_mascot.svg.j2" %}</div>
       <div style="flex:1;min-width:240px">
         <h2 id="progress-title" style="margin:0 0 4px">{{ _("Procurando aparelhos…") }}</h2>
         <div class="hint" id="progress-detail"></div>
@@ -79,9 +83,12 @@ const T = {{ {
   "since": _("Desde o scan anterior: {a} novo(s), {b} resolvido(s)"), "unseen": _("aparelho(s) inédito(s):"),
   "alerted": _("alerta enviado"), "first": _("Primeiro scan deste histórico: os próximos serão comparados com este."),
   "failed": _("O scan falhou"),
+  "sev": {"critical": _("crítico"), "high": _("alto"), "medium": _("médio"), "low": _("baixo")},
 } | tojson }};
 const fmt = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k]);
 const LABEL = T.steps;
+
+document.querySelectorAll(".net-chip").forEach(b => b.addEventListener("click", () => { $("targets").value = b.dataset.net; }));
 
 $("scan-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -153,7 +160,7 @@ function done(job) {
   g.style.color = getComputedStyle(document.documentElement).getPropertyValue("--" + ({A: "good", B: "good", C: "medium", D: "high", F: "critical"}[s.grade]));
   r.querySelector(".grade").textContent = s.grade;
   r.querySelector(".score").textContent = `${s.score}/100` + (s.score_delta ? ` (${s.score_delta > 0 ? "+" : ""}${s.score_delta})` : "");
-  const counts = Object.entries(s.counts).filter(([k, n]) => n && k !== "info").map(([k, n]) => `${n} ${k}`).join(" · ") || T.none;
+  const counts = Object.entries(s.counts).filter(([k, n]) => n && k !== "info").map(([k, n]) => `${n} ${T.sev[k] || k}`).join(" · ") || T.none;
   r.querySelector(".sum").textContent = fmt(T.devices, {n: s.hosts}) + " · " + counts + (s.accepted ? " · " + fmt(T.accepted, {n: s.accepted}) : "");
   r.querySelector(".diff").textContent = s.previous
     ? fmt(T.since, {a: s.new_findings, b: s.resolved}) + (s.new_devices.length ? ` · ${T.unseen} ${s.new_devices.join(", ")}` : "")

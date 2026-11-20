@@ -21,7 +21,7 @@ Baixe o `threeblindmice_<versão>_x64-setup.exe` na [página de releases](https:
 O instalador ainda não tem assinatura digital, então o Windows pode mostrar "O Windows protegeu o computador": clique em *Mais informações* e depois em *Executar assim mesmo*. Antes, confira que o arquivo é o original comparando o SHA-256 com o do arquivo `.sha256` publicado na release:
 
 ```bash
-certutil -hashfile threeblindmice_0.8.0_x64-setup.exe SHA256
+certutil -hashfile threeblindmice_0.9.0_x64-setup.exe SHA256
 ```
 
 Para gerar o instalador você mesmo: `pip install -e ".[desktop]" pyinstaller` e `python packaging/windows/build.py` (precisa do [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
@@ -49,7 +49,8 @@ tbm gui
 ```
 
 Abre o navegador numa interface local onde você pode:
-- ver a **saúde da rede** de relance: nota no medidor, variação desde o último scan, progresso ("13 de 26 problemas resolvidos") e as **3 ações mais importantes agora**;
+- ver a **saúde da rede** de relance: nota no medidor, variação desde o último scan, progresso e as **3 ações mais importantes agora**, com quantos pontos cada uma soma e a nota que você terá ao fazer as três ("D → B");
+- **corrigir agora**: cada ação vira um passo a passo marcável e termina num botão "Já fiz, verificar", que escaneia só aquele aparelho em segundos e mostra o que foi resolvido;
 - fazer um scan **ao vivo**, com as etapas e os aparelhos aparecendo conforme são encontrados (a primeira abertura traz um assistente de boas-vindas);
 - ver os **achados agrupados pela correção** ("atualizar o firmware do modem resolve 4 achados"), priorizados por KEV/EPSS, e **aceitar riscos** com um clique;
 - explorar o **mapa da rede** (internet → roteador → aparelhos, colorido pelo pior problema, com aviso de NAT duplo) e os **dispositivos**, cada um com painel de detalhes;
@@ -60,6 +61,8 @@ Abre o navegador numa interface local onde você pode:
 - ligar o **vigia automático**, que roda sem abrir janela e mostra a próxima execução e a saída das últimas;
 - gerar a **carta para o provedor** de qualquer equipamento com achados;
 - conhecer **todas as funcionalidades**, com o comando equivalente de cada uma.
+
+A navegação fica numa barra lateral recolhível, com **busca global** (`Ctrl+K` ou `/`: aparelhos, ações e páginas), **notificações** (aparelho desconhecido, scan concluído, problemas resolvidos) e atalhos (`N` novo scan, `G` e depois `M` para o mapa). O **modo simples** esconde portas, CVEs e evidências para quem só quer saber o que fazer. Cada aparelho tem página própria, com histórico de IPs, portas e problemas, categoria e notas; o mapa tem zoom, filtros e mostra quem saiu da rede. Renomear, aprovar e aceitar riscos acontece sem recarregar a página, com "Desfazer".
 
 Tem tema claro, escuro ou automático, em **português ou inglês** (botão PT/EN, ou o idioma do navegador), funciona só com teclado e não carrega nada de fora (CSS, JS e ícones são locais). O relatório HTML (o "Relatório completo" da interface, ou o `.html` gerado pelo `tbm run`) traz as ações por prioridade e sai bem impresso ou em PDF.
 
@@ -76,7 +79,7 @@ tbm shortcut install          # atalho no menu Iniciar (Windows) ou no lançador
 tbm shortcut install --desktop  # também na Área de Trabalho
 ```
 
-No Windows e no Linux, o app fica com um **ícone na bandeja**, com um ponto colorido pela nota do último scan (verde a vermelho). Fechar a janela só a esconde: scans em andamento continuam, e uma notificação avisa quando terminam. Para encerrar, use "Sair" no menu da bandeja (ou `tbm app --no-tray` para fechar junto com a janela). Abrir o app de novo reaproveita a instância que já está rodando.
+No Windows e no Linux, o app fica com um **ícone na bandeja**, com um ponto colorido pela nota do último scan (verde a vermelho). Fechar a janela só a esconde: scans em andamento continuam, e uma notificação avisa quando terminam. Para encerrar, use "Sair" no menu da bandeja (ou `tbm app --no-tray` para fechar junto com a janela). Abrir o app de novo traz para a frente a janela que já está aberta; se a versão instalada mudou, a instância antiga é encerrada e a nova assume. A bandeja mostra a nota, os aparelhos não aprovados e tem "Escanear agora", e a barra de título da janela segue as cores do app.
 
 ## Uso pela linha de comando
 
@@ -132,7 +135,12 @@ Destinos de `--notify` (ou `TBM_WEBHOOK`):
 | ntfy (push grátis no celular) | `ntfy://<tópico>` ou `https://ntfy.sh/<tópico>` |
 | Telegram | `tg://<token-do-bot>/<chat_id>` |
 | Discord / Slack | URL do webhook |
+| E-mail (SMTP) | `smtp://usuario:senha@servidor:587/destino@exemplo.com` |
+| Pushover | `pushover://<app_token>@<user_key>` |
+| Home Assistant | `hass://seu-ha:8123/<webhook_id>` |
 | Qualquer outro | URL https (recebe um POST com JSON completo) |
+
+Dá para definir um **horário de silêncio** (só alertas críticos passam de madrugada) e o resumo semanal avisa quando uma **aceitação de risco está para vencer**.
 
 ### O que mais o scan olha
 
@@ -140,7 +148,13 @@ Além dos aparelhos, o scan da rede local verifica:
 
 - **Wi-Fi**: a criptografia da rede em que o computador está (aberta, WEP, WPA/TKIP, WPA2, WPA3);
 - **IPv6**: aparelhos com endereço IPv6 público e portas que também respondem por ele. No IPv6 não há NAT, então só o firewall do roteador protege;
-- **nomes**: quando o DNS não sabe o nome do aparelho, o tbm pergunta direto a ele, via NetBIOS e LLMNR.
+- **nomes**: quando o DNS não sabe o nome do aparelho, o tbm pergunta direto a ele, via NetBIOS e LLMNR;
+- **modelo e firmware**: lê o que o próprio aparelho anuncia (UPnP, SNMP), para os guias e a busca de CVEs ficarem exatos;
+- **Wi-Fi falso**: avisa se existe uma rede aberta com o mesmo nome da sua (golpe do "gêmeo maligno");
+- **DHCP intruso**: avisa se há mais de um servidor DHCP respondendo (sinal de interceptação);
+- **casa conectada**: câmera entregando vídeo sem senha (RTSP), broker MQTT anônimo, impressoras e gravadores expostos;
+- **senha de fábrica**: lembra de conferir a senha de roteadores e câmeras — o tbm **não tenta adivinhar senha nenhuma**;
+- **NAT duplo e CGNAT**: confirmados pelo IP externo que o roteador informa.
 
 Com `--external` (na interface, "Verificações externas") entram mais dois testes, que mandam o seu IP público para serviços de terceiros:
 
@@ -157,6 +171,18 @@ tbm summary --disable                # desliga o automático
 ```
 
 A interface avisa quando há **versão nova** no GitHub (uma consulta por dia). O tbm só avisa: não baixa nem instala nada sozinho. Junto com o aviso vêm o SHA-256 publicado e o comando para verificar o atestado. Para desligar: `tbm update --disable`.
+
+### Vigia em tempo real, perfis de rede e mais
+
+- **Vigia em tempo real**: com o app aberto (mesmo só na bandeja), uma thread leve relê a rede a cada minuto e avisa na hora quando um aparelho novo aparece, sem esperar o scan agendado. Em "Vigia" dá para ligar **iniciar com o sistema** (desligado por padrão).
+- **Perfis de rede**: o app reconhece em que rede você está pelo MAC do roteador e sugere o histórico certo ("casa", "escritório"). Se o computador está em mais de uma rede (cabo, Wi-Fi, convidados, VM), o formulário de scan oferece todas.
+- **Comparar scans** e **relatório para a família**: na linha do tempo, veja dois momentos lado a lado, ou gere uma página simples (sem jargão) para imprimir ou salvar em PDF.
+- **Modo demonstração**: `tbm demo` abre a interface com uma rede fictícia, sem tocar no seu histórico (bom para prints e apresentações).
+- **Métricas**: `tbm dashboard` expõe `GET /metrics` no formato Prometheus (só a nota e as contagens agregadas, nunca IPs ou nomes).
+
+### Instalar
+
+O instalador do Windows, o `pip` e o Docker continuam valendo (veja [Instalação](#instalação)). A imagem Docker agora é **multiarquitetura** (x86-64 e ARM64), então roda num Raspberry Pi ou NAS para deixar o vigia 24 h. Há também um manifesto do **Scoop** em `packaging/scoop/`.
 
 ### Outros comandos
 

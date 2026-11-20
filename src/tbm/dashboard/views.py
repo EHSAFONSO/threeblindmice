@@ -15,7 +15,7 @@ from tbm.dashboard.icons import device_icon
 from tbm.i18n import gettext as _
 from tbm.models import Host, ScanResult, Severity, utcnow
 from tbm.squeak import HistoryStore, diff_scans
-from tbm.squeak.actions import Action, build_actions, progress
+from tbm.squeak.actions import Action, build_actions, impacts, progress, project
 
 SEV_ORDER = ["critical", "high", "medium", "low"]
 
@@ -62,6 +62,10 @@ class Health:
     age: str
     gauge: dict[str, float]
     labels: list[str] = field(default_factory=list)
+    projection: Any = None  # nota se as 3 primeiras ações forem feitas
+    impact: dict[str, int] = field(default_factory=dict)  # pontos que cada ação soma
+    unknown: int = 0  # aparelhos não aprovados
+    resolved_total: int = 0
 
 
 def health(store: HistoryStore, label: str) -> Health | None:
@@ -78,11 +82,15 @@ def health(store: HistoryStore, label: str) -> Health | None:
     for f in scan.findings:
         if not f.accepted and f.severity.value in counts:
             counts[f.severity.value] += 1
+    actions = build_actions(scan)
     return Health(
-        label=label, scan=scan, actions=build_actions(scan), progress=progress(history, scan), delta=delta,
+        label=label, scan=scan, actions=actions, progress=progress(history, scan), delta=delta,
         scores=[r["score"] or 0 for r in reversed(rows)], devices=len(scan.hosts), open_counts=counts,
         age=humanize_age(scan.started_at), gauge=gauge(scan.score or 0),
         labels=[r["label"] for r in store.labels()],
+        projection=project(scan, actions[:3]) if actions else None,
+        impact=impacts(scan, actions),
+        unknown=sum(1 for h in scan.hosts if not h.trusted),
     )
 
 
@@ -101,7 +109,8 @@ def _short(h: Host) -> str:
     return name if len(name) <= 22 else name[:20] + "…"
 
 
-def network_map(scan: ScanResult) -> dict[str, Any]:
+def network_map(scan: ScanResult, offline: list[Host] | None = None) -> dict[str, Any]:
+    """Internet → roteador → aparelhos. `offline`: vistos em scans recentes, ausentes neste."""
     def ip_order(h: Host) -> tuple[int, ...]:
         parts = h.address.split(".")
         return tuple(int(p) for p in parts) if len(parts) == 4 and all(p.isdigit() for p in parts) else (999,)
@@ -130,7 +139,7 @@ def network_map(scan: ScanResult) -> dict[str, Any]:
         if h.device_type:
             tip += f" · {escape(h.device_type)}"
         return {"x": round(x), "y": round(y), "icon": device_icon(h.device_type), "label": _short(h), "sub": h.address,
-                "type": h.device_type,
+                "type": h.device_type, "trusted": h.trusted, "category": h.category or "",
                 "sev": worst(scan, h.address), "address": h.address, "role": role, "tip": tip}
 
     hub_y = 186
@@ -155,8 +164,32 @@ def network_map(scan: ScanResult) -> dict[str, Any]:
             edges.append({"x1": cx, "y1": hub_y, "x2": x, "y2": y, "dashed": False})
     rows = math.ceil(len(devices) / PER_ROW) if devices else 0
     height = (top + (rows - 1) * 140 + 80) if rows else hub_y + 90
+    # aparelhos que sumiram: uma faixa embaixo, tracejada, sem ligação com o roteador
+    off = offline or []
+    if off:
+        off_top = height + 70
+        for i, h in enumerate(off[:PER_ROW * 2]):
+            row, col = divmod(i, PER_ROW)
+            in_row = min(PER_ROW, len(off) - row * PER_ROW)
+            n = node(h, MAP_W / (in_row + 1) * (col + 1), off_top + row * 130, "offline")
+            n["sev"] = "none"
+            nodes.append(n)
+        height = off_top + (math.ceil(min(len(off), PER_ROW * 2) / PER_ROW) - 1) * 130 + 80
     legend = {s: sum(1 for n in nodes if n["sev"] == s) for s in [*SEV_ORDER, "ok"]}
-    return {"width": MAP_W, "height": height, "nodes": nodes, "edges": edges, "notes": notes, "legend": legend}
+    return {"width": MAP_W, "height": height, "nodes": nodes, "edges": edges, "notes": notes, "legend": legend,
+            "offline_y": (top + (rows - 1) * 140 + 80 + 30) if off and rows else None}
+
+
+def offline_hosts(store: HistoryStore, label: str, scan: ScanResult, window: int = 10) -> list[Host]:
+    """Aparelhos vistos nos últimos scans que não apareceram neste (desligados ou fora de casa)."""
+    present = {h.identity for h in scan.hosts}
+    seen: dict[str, Host] = {}
+    for r in store.list(label, window)[1:]:
+        old = store.get(r["scan_id"])
+        for h in old.hosts if old else []:
+            if h.identity not in present and h.identity not in seen:
+                seen[h.identity] = h
+    return list(seen.values())
 
 
 # ───────────────────────────── linha do tempo ─────────────────────────────
@@ -218,6 +251,40 @@ def timeline(store: HistoryStore, label: str, limit: int = 30) -> dict[str, Any]
             "grid": [{"y": round(y(v), 1), "v": v} for v in (0, 25, 50, 75, 100)],
             "band_good": {"y": y(100), "h": y(90) - y(100)}, "band_bad": {"y": y(40), "h": y(0) - y(40)},
             "points": points, "labels": labels, "path": path, "area": area}
+
+
+def device_history(store: HistoryStore, label: str, identity: str, limit: int = 30) -> dict[str, Any]:
+    """O que mudou neste aparelho, scan a scan: IP, portas e achados abertos."""
+    events: list[dict[str, Any]] = []
+    series: list[int] = []
+    prev: dict[str, Any] | None = None
+    for r in reversed(store.list(label, limit)):
+        scan = store.get(r["scan_id"])
+        if scan is None:
+            continue
+        host = next((h for h in scan.hosts if h.identity == identity), None)
+        if host is None:
+            continue
+        ports = {s.port for s in host.services if s.transport == "tcp"}
+        open_fp = {f.fingerprint: f.title for f in scan.findings
+                   if f.host == host.address and not f.accepted and f.severity is not Severity.INFO}
+        series.append(len(open_fp))
+        when = scan.started_at.astimezone().strftime("%d/%m %H:%M")
+        if prev is None:
+            events.append({"when": when, "text": _("Visto pela primeira vez em {ip}", ip=host.address)})
+        else:
+            if host.address != prev["ip"]:
+                events.append({"when": when, "text": _("IP mudou: {a} → {b}", a=prev["ip"], b=host.address)})
+            if opened := sorted(ports - prev["ports"]):
+                events.append({"when": when, "text": _("Porta(s) aberta(s): {p}", p=", ".join(map(str, opened)))})
+            if closed := sorted(prev["ports"] - ports):
+                events.append({"when": when, "text": _("Porta(s) fechada(s): {p}", p=", ".join(map(str, closed)))})
+            if fixed := [t for fp, t in prev["open"].items() if fp not in open_fp]:
+                events.append({"when": when, "text": _("Resolvido: {t}", t="; ".join(fixed[:3]))})
+            if new := [t for fp, t in open_fp.items() if fp not in prev["open"]]:
+                events.append({"when": when, "text": _("Novo problema: {t}", t="; ".join(new[:3]))})
+        prev = {"ip": host.address, "ports": ports, "open": open_fp}
+    return {"events": list(reversed(events))[:25], "series": series}
 
 
 def device_detail(store: HistoryStore, label: str, address: str) -> dict[str, Any] | None:

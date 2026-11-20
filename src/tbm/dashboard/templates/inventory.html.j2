@@ -1,17 +1,28 @@
 {% extends "base.html.j2" %}
 {% block title %}{{ _("Dispositivos") }} · {{ label }}{% endblock %}
 {% block content %}
-<div class="row" style="margin-bottom:12px">
-  <h1 style="font-size:22px">{{ _("Dispositivos") }} · {{ label }}</h1><span class="spacer"></span>
+<div class="row" style="margin-bottom:6px">
+  <h1>{{ _("Dispositivos") }} · {{ label }}</h1><span class="spacer"></span>
   <a class="btn sm subtle" href="/map/{{ label | urlencode }}"><svg class="icon" aria-hidden="true"><use href="#i-map"/></svg>{{ _("Ver no mapa") }}</a>
 </div>
 <p class="hint">{{ _("Último scan {id} em {t}", id=scan.scan_id, t=scan.started_at.astimezone().strftime("%d/%m/%Y %H:%M")) }} ·
   {{ _("{n} dispositivo(s)", n=devices | length) }} · {{ _("histórico de {n} scan(s).", n=scans_seen) }}
   {{ _("Cada aparelho é reconhecido pelo MAC (ou pelo nome anunciado), então trocar de IP não o transforma num aparelho novo.") }}</p>
-<div class="grid cols-3" style="margin-top:12px">
+
+<div class="chips" role="toolbar" aria-label="{{ _('Filtrar') }}" id="filters" style="margin:12px 0">
+  <button type="button" data-filter="all" aria-pressed="true">{{ _("Todos") }} ({{ devices | length }})</button>
+  {% set pending = devices | rejectattr("host.trusted") | list | length %}
+  {% if pending %}<button type="button" data-filter="pending" aria-pressed="false">{{ _("Não aprovados") }} ({{ pending }})</button>{% endif %}
+  <button type="button" data-filter="problems" aria-pressed="false">{{ _("Com problemas") }}</button>
+  {% for k, name in CATEGORIES.items() %}{% set n = devices | selectattr("host.category", "equalto", k) | list | length %}
+  {% if n %}<button type="button" data-filter="cat:{{ k }}" aria-pressed="false">{{ _(name) }} ({{ n }})</button>{% endif %}{% endfor %}
+</div>
+
+<div class="grid cols-3 reveal" id="devices">
   {% for d in devices %}{% set h = d.host %}
-  <article class="card clickable" tabindex="0" role="button" data-drawer="/partials/device/{{ label | urlencode }}/{{ h.address }}"
-           aria-label="{{ h.name or h.address }}: {{ _("abrir detalhes") }}">
+  <article class="card clickable" tabindex="0" role="button" data-card="{{ h.identity }}" data-drawer="/partials/device/{{ label | urlencode }}/{{ h.address }}"
+           data-trusted="{{ h.trusted | lower }}" data-problems="{{ (d.total > 0) | lower }}" data-category="{{ h.category or '' }}"
+           aria-label="{{ h.name or h.address }}: {{ _('abrir detalhes') }}">
     <div class="device-card">
       <span class="device-icon {{ d.sev }}"><svg class="icon lg" aria-hidden="true"><use href="#i-{{ d.icon }}"/></svg></span>
       <div style="min-width:0;flex:1">
@@ -20,29 +31,44 @@
       </div>
     </div>
     <div class="row hint" style="margin-top:12px">
-      <span class="mono">{{ h.address }}</span>{% if d.ips | length > 1 %}<span>({{ _("antes:") }} {{ d.ips[:-1] | join(", ") }})</span>{% endif %}
+      <span class="mono">{{ h.address }}</span>{% if d.ips | length > 1 %}<span class="tech">({{ _("antes:") }} {{ d.ips[:-1] | join(", ") }})</span>{% endif %}
+      {% if h.category %}<span class="cat"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg>{{ _(CATEGORIES[h.category]) }}</span>{% endif %}
     </div>
-    {% if h.mac %}<div class="hint mono">{{ h.mac }}{% if h.vendor %} · {{ h.vendor }}{% endif %}</div>{% endif %}
+    {% if h.mac %}<div class="hint mono tech">{{ h.mac }}{% if h.vendor %} · {{ h.vendor }}{% endif %}</div>{% endif %}
     <div class="row" style="margin-top:10px">
-      {% for s in ["critical", "high", "medium", "low"] %}{% if d.counts[s] %}<span class="badge sev-{{ s }}">{{ d.counts[s] }} {{ s }}</span>{% endif %}{% endfor %}
+      {% for s in ["critical", "high", "medium", "low"] %}{% if d.counts[s] %}<span class="badge sev-{{ s }}">{{ d.counts[s] }} {{ s | sev }}</span>{% endif %}{% endfor %}
       {% if not d.total %}<span class="badge sev-ok">{{ _("sem problemas") }}</span>{% endif %}
       {% if d.accepted %}<span class="badge sev-info">{{ _("{n} aceito(s)", n=d.accepted) }}</span>{% endif %}
     </div>
-    <div class="row hint" style="margin-top:10px">
+    <div class="row hint tech" style="margin-top:10px">
       <span>{{ _("{n} porta(s)", n=h.services | length) }}</span><span>·</span><span>{{ _("visto {a}× de {b}", a=d.times_seen, b=scans_seen) }}</span>
       <span>·</span><span>{{ _("desde {d}", d=d.first_seen) }}</span>
     </div>
     {% if gui %}
-    <div class="row" style="margin-top:10px">
-      {% if h.trusted %}<span class="badge sev-ok" title="{{ _("Você aprovou este aparelho") }}">✓ {{ _("conhecido") }}</span>
-      <button class="btn sm subtle" type="button" data-identity="{{ h.identity }}" onclick="tbmTrustDevice(this.dataset.identity, false)">{{ _("Remover aprovação") }}</button>
-      {% else %}<span class="badge sev-medium">{{ _("não aprovado") }}</span>
-      <button class="btn sm" type="button" data-identity="{{ h.identity }}" onclick="tbmTrustDevice(this.dataset.identity, true)">{{ _("Aprovar") }}</button>{% endif %}
+    <div class="row" style="margin-top:12px">
+      {% if h.trusted %}<span class="badge sev-ok" title="{{ _('Você aprovou este aparelho') }}">{{ _("conhecido") }}</span>
+      {% else %}<button class="btn sm" type="button" data-identity="{{ h.identity }}" onclick="tbmTrustDevice(this.dataset.identity, true)">{{ _("Aprovar") }}</button>{% endif %}
       <button class="btn sm subtle" type="button" data-identity="{{ h.identity }}" data-alias="{{ h.alias or '' }}" onclick="tbmRenameDevice(this.dataset.identity, this.dataset.alias)">{{ _("Renomear") }}</button>
+      <span class="spacer"></span>
+      <a class="hint" href="/device/{{ label | urlencode }}/{{ h.address }}">{{ _("Detalhes →") }}</a>
     </div>
     {% if d.total %}<a class="hint" style="display:inline-block;margin-top:8px" href="/letter?label={{ label | urlencode }}&host={{ h.address | urlencode }}">{{ _("carta para o provedor →") }}</a>{% endif %}
     {% endif %}
   </article>
   {% endfor %}
 </div>
+<script>
+(() => {
+  const bar = document.getElementById("filters");
+  bar.addEventListener("click", e => {
+    const b = e.target.closest("[data-filter]"); if (!b) return;
+    bar.querySelectorAll("[data-filter]").forEach(x => x.setAttribute("aria-pressed", x === b));
+    const f = b.dataset.filter;
+    document.querySelectorAll("#devices [data-card]").forEach(c => {
+      c.hidden = !(f === "all" || (f === "pending" && c.dataset.trusted === "false") || (f === "problems" && c.dataset.problems === "true")
+                   || (f.startsWith("cat:") && c.dataset.category === f.slice(4)));
+    });
+  });
+})();
+</script>
 {% endblock %}

@@ -142,6 +142,88 @@ def classify_wifi(info: WifiInfo) -> tuple[Severity, str, str, str] | None:
 
 
 @register
+class EvilTwinCheck(Check):
+    id = "network.evil-twin"
+    name = "Wi-Fi falso com o nome da sua rede"
+
+    async def run(self, ctx: CheckContext) -> list[Finding]:
+        if not _lan_scan(ctx):
+            return []
+        from tbm.scout.wifi import evil_twin, visible_networks
+
+        info = await asyncio.to_thread(read_wifi)
+        if info is None or not info.ssid:
+            return []
+        twins = evil_twin(info.ssid, await visible_networks())
+        if not twins:
+            return []
+        return [Finding(
+            check_id=self.id, host=WIFI_HOST, key="evil-twin", severity=Severity.HIGH,
+            title=f"Existe uma rede Wi-Fi ABERTA com o nome da sua ({info.ssid})",
+            description=("Apareceu uma rede sem senha usando exatamente o nome da sua rede. É o golpe do 'gêmeo "
+                         "maligno': seus aparelhos podem se conectar a ela por engano, e aí o atacante vê tudo o "
+                         "que você faz. Pode ser um vizinho mal-intencionado ou um aparelho de ataque por perto."),
+            evidence=f"rede aberta com SSID '{info.ssid}' visível agora",
+            remediation=("Confirme que a SUA rede tem senha (WPA2/WPA3). Nos seus aparelhos, 'esqueça' a rede e "
+                         "reconecte escolhendo a com cadeado. Se o gêmeo persistir, pode haver um aparelho de "
+                         "ataque na vizinhança."),
+        )]
+
+
+@register
+class RogueDHCPCheck(Check):
+    id = "network.rogue-dhcp"
+    name = "Segundo servidor DHCP na rede"
+
+    async def run(self, ctx: CheckContext) -> list[Finding]:
+        if not _lan_scan(ctx):
+            return []
+        from tbm.scout.wifi import discover_dhcp_servers
+
+        servers = await discover_dhcp_servers()
+        if servers is None or len(servers) < 2:
+            return []  # None = não deu para testar; 0/1 = normal
+        return [Finding(
+            check_id=self.id, host=ctx.scan.gateway or WIFI_HOST, key="rogue-dhcp", severity=Severity.HIGH,
+            title=f"{len(servers)} servidores DHCP respondendo na rede",
+            description=("Numa rede doméstica normal, só o roteador entrega endereços (DHCP). Vários servidores "
+                         "podem significar um aparelho intruso tentando virar o 'roteador' dos seus aparelhos "
+                         "para interceptar o tráfego, ou um segundo roteador ligado por engano."),
+            evidence="servidores DHCP: " + ", ".join(sorted(servers)),
+            remediation=("Confira se há mais de um roteador ligado. Se só deveria haver um, procure o aparelho "
+                         "extra pelo endereço acima e desligue-o; troque a senha do Wi-Fi."),
+        )]
+
+
+@register
+class DefaultPasswordHintCheck(Check):
+    id = "network.default-pass"
+    name = "Senha de fábrica do roteador/câmera"
+
+    async def run(self, ctx: CheckContext) -> list[Finding]:
+        if not _lan_scan(ctx):
+            return []
+        from tbm.sniffer.iot_checks import likely_default_password
+
+        out = []
+        for h in ctx.scan.hosts:
+            if not likely_default_password(h):
+                continue
+            kind = "roteador" if h.device_type == "roteador/modem" else "câmera/gravador"
+            out.append(Finding(
+                check_id=self.id, host=h.address, key="hint", severity=Severity.INFO,
+                title=f"Confirme se a senha de administração do {kind} foi trocada",
+                description=("Muitos aparelhos saem de fábrica com uma senha padrão (admin/admin e parecidas), "
+                             "publicada na internet. O tbm NÃO tenta adivinhar a senha; este é só um lembrete para "
+                             "você conferir, porque é um dos pontos mais explorados em redes domésticas."),
+                evidence=f"página de administração em {h.address}",
+                remediation=("Entre na administração do aparelho e troque a senha por uma longa e única. "
+                             "Aproveite para desligar o acesso remoto pela internet."),
+            ))
+        return out
+
+
+@register
 class WifiCheck(Check):
     id = "network.wifi"
     name = "Criptografia do Wi-Fi"

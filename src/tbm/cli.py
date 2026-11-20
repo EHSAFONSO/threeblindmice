@@ -26,7 +26,7 @@ from rich.progress import (
 from rich.table import Table
 
 from tbm import __version__, schedule
-from tbm.config import config_path, notify_target, persist_notify
+from tbm.config import config_path, notify_target, persist_notify, quiet_hours
 from tbm.models import Finding, Host, ScanResult, Severity
 from tbm.paths import cache_dir
 from tbm.pipeline import ScanJob, execute, finalize, run_sniffer
@@ -271,7 +271,7 @@ async def _notify(webhook: str | None, result: ScanResult, diff: ScanDiff, min_s
     if not webhook:
         return
     try:
-        sent = await send_webhook(webhook, result, diff, min_severity)
+        sent = await send_webhook(webhook, result, diff, min_severity, quiet=quiet_hours())
         console.print("Alerta enviado." if sent else "[dim]Nada novo para alertar.[/]")
     except Exception as exc:  # noqa: BLE001
         err.print(f"[yellow]falha ao enviar webhook: {exc}[/]")
@@ -866,6 +866,7 @@ def gui(
 @app.command("app")
 def desktop_app(
     no_tray: Annotated[bool, typer.Option("--no-tray", help="Sem ícone na bandeja: fechar a janela encerra o app.")] = False,
+    hidden: Annotated[bool, typer.Option("--hidden", help="Começa minimizado na bandeja (usado ao iniciar com o sistema).")] = False,
     smoke: Annotated[bool, typer.Option("--smoke", hidden=True)] = False,
 ) -> None:
     """[bold]Aplicativo de desktop:[/] a interface numa janela própria, com ícone na bandeja."""
@@ -875,7 +876,7 @@ def desktop_app(
         from tbm.desktop.app import DesktopApp
     except ImportError as exc:
         raise _fail('dependências do app ausentes: pip install "threeblindmice[desktop]"') from exc
-    runner = DesktopApp(tray_enabled=not no_tray, smoke=smoke)
+    runner = DesktopApp(tray_enabled=not no_tray, smoke=smoke, start_hidden=hidden)
     code = runner.run()
     if smoke:
         console.print(runner.smoke_result)
@@ -903,6 +904,49 @@ def update_cmd(
     if release.sha256:
         console.print(f"SHA-256 de {release.setup_name}: [cyan]{release.sha256}[/]")
         console.print(f"Para provar a origem: [cyan]{release.verify_command}[/]")
+
+
+def _dashboard_fn() -> None:
+    dashboard()
+
+
+@app.command("demo")
+def demo_cmd(
+    dashboard: Annotated[bool, typer.Option("--dashboard", help="Abre o dashboard (somente leitura) em vez da interface completa.")] = False,
+) -> None:
+    """Abre a interface com uma rede fictícia, para prints e apresentações (não toca no seu histórico)."""
+    import os
+
+    from tbm.demo import demo_home
+
+    os.environ["TBM_HOME"] = str(demo_home())
+    console.print("[bold]Modo demonstração[/]: rede fictícia, histórico temporário.")
+    if dashboard:
+        _dashboard_fn()
+        return
+    try:
+        import webview  # noqa: F401
+    except ImportError:
+        _dashboard_fn()
+    else:
+        desktop_app()
+
+
+@app.command("autostart")
+def autostart_cmd(
+    enable: Annotated[bool, typer.Option("--enable", help="Inicia o app com o sistema, minimizado na bandeja.")] = False,
+    disable: Annotated[bool, typer.Option("--disable", help="Não inicia mais com o sistema.")] = False,
+) -> None:
+    """Liga/desliga iniciar o app de desktop junto com o sistema (vigia em tempo real)."""
+    from tbm.desktop import autostart
+
+    if not autostart.supported():
+        raise _fail("não suportado neste sistema")
+    if enable:
+        autostart.enable()
+    elif disable:
+        autostart.disable()
+    console.print(f"Iniciar com o sistema: [bold]{'ligado' if autostart.is_enabled() else 'desligado'}[/]")
 
 
 @app.command("summary")

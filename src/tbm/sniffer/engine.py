@@ -15,6 +15,7 @@ from tbm.scope import Scope
 from tbm.sniffer import (  # noqa: F401 (importar registra os checks)
     cve,
     http_checks,
+    iot_checks,
     network_checks,
     secrets,
     service_checks,

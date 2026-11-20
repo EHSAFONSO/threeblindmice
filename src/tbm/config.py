@@ -49,6 +49,16 @@ def save(data: dict[str, Any]) -> None:
     tmp.replace(path)  # troca atômica: nunca fica um config.json pela metade
 
 
+def quiet_hours() -> tuple[str, str] | None:
+    """Janela de silêncio HH:MM–HH:MM, se configurada (alertas não-críticos ficam retidos)."""
+    data = load()
+    start, end = str(data.get("quiet_start") or ""), str(data.get("quiet_end") or "")
+    import re as _re
+    if _re.fullmatch(r"\d{2}:\d{2}", start) and _re.fullmatch(r"\d{2}:\d{2}", end):
+        return start, end
+    return None
+
+
 def notify_target() -> tuple[str | None, str]:
     """(destino, origem). Origem: "env", "config" ou "none"."""
     if env := os.environ.get(ENV, "").strip():
@@ -98,7 +108,9 @@ def describe(target: str | None) -> dict[str, str]:
     host = p.hostname or ""
     if p.scheme == "tg":
         chat = p.path.strip("/") or "?"
-        return {"kind": "telegram", "label": f"Telegram · chat {chat}"}
+        # Só o final do chat_id: o número aparece em prints da tela que você compartilhar.
+        shown = "••••" + chat[-4:] if len(chat) > 4 else chat
+        return {"kind": "telegram", "label": f"Telegram · chat {shown}"}
     if p.scheme == "ntfy" or host == "ntfy.sh":
         topic = (p.netloc + p.path).strip("/") if p.scheme == "ntfy" else p.path.strip("/")
         shown = topic[:4] + "…" + topic[-2:] if len(topic) > 8 else "…"
@@ -107,4 +119,12 @@ def describe(target: str | None) -> dict[str, str]:
         return {"kind": "discord", "label": "Discord (webhook)"}
     if host.endswith("slack.com"):
         return {"kind": "slack", "label": "Slack (webhook)"}
+    if p.scheme in ("smtp", "smtps", "mailto"):
+        from urllib.parse import unquote
+        to = unquote(p.path.strip("/")) or "?"
+        return {"kind": "email", "label": f"E-mail · {to}"}
+    if p.scheme == "pushover":
+        return {"kind": "pushover", "label": "Pushover"}
+    if p.scheme in ("hass", "homeassistant"):
+        return {"kind": "hass", "label": f"Home Assistant · {host or '?'}"}
     return {"kind": "webhook", "label": f"Webhook em {host or '?'}"}

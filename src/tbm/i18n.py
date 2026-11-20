@@ -114,5 +114,7 @@ def js_catalog() -> dict[str, str]:
     keys = ["Cancelar", "Confirmar", "Salvar", "Nome do aparelho",
             "Como você chama este aparelho? Deixe vazio para voltar ao nome detectado.",
             "Aparelho aprovado: não vai mais alertar como desconhecido", "Aprovação removida",
-            "Falha ao carregar.", "Erro"]
+            "Falha ao carregar.", "Erro", "Nome salvo", "Desfazer", "Buscar aparelho, achado ou página…",
+            "Nada encontrado", "Carregando…", "Tema: automático", "Tema: claro", "Tema: escuro",
+            "Automático", "Claro", "Escuro"]
     return {k: gettext(k) for k in keys}

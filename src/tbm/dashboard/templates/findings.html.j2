@@ -3,25 +3,25 @@
 {% macro finding(f) %}
 <details class="finding" style="border-top:1px solid var(--line);padding:9px 0">
   <summary class="row" style="cursor:pointer">
-    <span class="badge sev-{{ f.severity.value }}">{{ f.severity.value }}</span>
+    <span class="badge sev-{{ f.severity.value }}">{{ f.severity | sev }}</span>
     <span style="flex:1;{% if f.accepted or f.fingerprint in pending %}color:var(--muted){% endif %}">{{ f.title }}</span>
     {% if f.accepted or f.fingerprint in pending %}<span class="badge sev-info">{{ _("aceito") }}</span>{% endif %}
-    <code class="hint">{{ f.location }}</code>
+    <code class="hint tech">{{ f.location }}</code>
   </summary>
   <div style="padding:8px 0 4px">
     {% if f.acceptance %}<p class="hint"><b>{{ _("Aceitação:") }}</b> {{ f.acceptance }}</p>
     {% elif f.fingerprint in pending %}<p class="hint"><b>{{ _("Risco aceito:") }}</b> {{ _("vale a partir do próximo scan.") }}</p>{% endif %}
     {% if f.description %}<p style="white-space:pre-line;margin:4px 0">{{ f.description }}</p>{% endif %}
-    {% if f.evidence %}<span class="hint"><b>{{ _("Evidência") }}</b></span><pre class="box">{{ f.evidence }}</pre>{% endif %}
+    {% if f.evidence %}<div class="tech"><span class="hint"><b>{{ _("Evidência") }}</b></span><pre class="box">{{ f.evidence }}</pre></div>{% endif %}
     {% if f.remediation %}<span class="hint"><b>{{ _("Como corrigir") }}</b></span><p style="margin:4px 0">{{ f.remediation }}</p>{% endif %}
-    {% for ref in f.references %}<a href="{{ ref }}" target="_blank" rel="noopener noreferrer">{{ ref }}</a><br>{% endfor %}
+    {% for ref in f.references %}<a class="tech" href="{{ ref }}" target="_blank" rel="noopener noreferrer">{{ ref }}</a><br class="tech">{% endfor %}
     <div class="row" style="margin-top:8px">
       {% if f.accepted or f.fingerprint in pending %}
         <button class="btn sm subtle" data-unaccept="{{ f.fingerprint }}">{{ _("Desfazer aceitação") }}</button>
       {% else %}
         <button class="btn sm subtle" data-open="{{ f.fingerprint }}">{{ _("Aceitar risco…") }}</button>
       {% endif %}
-      <span class="hint">id <code>{{ f.fingerprint[:8] }}</code></span>
+      <span class="hint tech">id <code>{{ f.fingerprint[:8] }}</code></span>
     </div>
     <form class="row accept-form" id="form-{{ f.fingerprint }}" hidden style="margin-top:8px">
       <label class="sr" for="r-{{ f.fingerprint }}">{{ _("Motivo") }}</label>
@@ -65,13 +65,17 @@
       <h2 style="margin:0 0 4px;font-size:17px">{{ action_title(a) }}</h2>
       <div class="hint">{{ _(a.why) }}</div>
       <div class="row" style="margin-top:8px">
-        <span class="badge sev-{{ a.severity.value }}">{{ a.severity.value }}</span>
+        <span class="badge sev-{{ a.severity.value }}">{{ a.severity | sev }}</span>
         <span class="hint">{{ _("resolve {n} achado(s)", n=a.findings | length) }}</span>
-        {% if a.kev %}<span class="badge sev-critical">{{ _("explorada ativamente (CISA KEV)") }}</span>
-        {% elif a.max_epss and a.max_epss >= 0.1 %}<span class="badge sev-high">EPSS {{ "%.0f" | format(a.max_epss * 100) }}%</span>{% endif %}
+        {% if impact.get(a.key, 0) > 0 %}<span class="impact">+{{ impact[a.key] }} {{ _("pontos") }}</span>{% endif %}
+        {% if a.kev %}<span class="badge sev-critical tech">{{ _("explorada ativamente (CISA KEV)") }}</span>
+        {% elif a.max_epss and a.max_epss >= 0.1 %}<span class="badge sev-high tech">EPSS {{ "%.0f" | format(a.max_epss * 100) }}%</span>{% endif %}
       </div>
     </div>
-    {% if a.letter_url(label) %}<a class="btn sm ghost" href="{{ a.letter_url(label) }}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>{{ _("Carta para o provedor") }}</a>{% endif %}
+    <div class="row">
+      {% if a.letter_url(label) %}<a class="btn sm ghost" href="{{ a.letter_url(label) }}"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg>{{ _("Carta para o provedor") }}</a>{% endif %}
+      <a class="btn sm" href="/fix/{{ label | urlencode }}/{{ a.key }}"><svg class="icon" aria-hidden="true"><use href="#i-wrench"/></svg>{{ _("Corrigir agora") }}</a>
+    </div>
   </div>
 {% set g = action_guide(a, scan) %}{% if g %}
   <details class="guide"><summary><svg class="icon" aria-hidden="true"><use href="#i-tool"/></svg>{% if g.brand %}{{ _("Como fazer no seu {b}", b=g.brand) }}{% else %}{{ _("Como fazer") }}{% endif %}</summary>
@@ -80,12 +84,12 @@
   <div style="margin-top:12px">{% for f in a.findings %}{{ finding(f) }}{% endfor %}</div>
 </article>
 {% else %}
-<div class="card empty"><svg class="icon xl" aria-hidden="true"><use href="#i-shield-check"/></svg><p>{{ _("Nada a corrigir neste scan.") }} 🎉</p></div>
+<div class="card empty">{% set sniff = False %}{% include "_mascot.svg.j2" %}<p>{{ _("Nada a corrigir neste scan.") }} 🎉</p></div>
 {% endfor %}
 
 {% if accepted %}
-<h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>{{ _("Riscos aceitos") }} ({{ accepted | length }})</h2>
-<div class="card">{% for f in accepted %}{{ finding(f) }}{% endfor %}</div>
+<div id="accepted-section"><h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>{{ _("Riscos aceitos") }} ({{ accepted | length }})</h2>
+<div class="card">{% for f in accepted %}{{ finding(f) }}{% endfor %}</div></div>
 {% endif %}
 {% if info %}
 <h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>{{ _("Informativos") }} ({{ info | length }})</h2>
@@ -113,14 +117,19 @@ document.addEventListener("click", async (e) => {
     e.preventDefault();
     const form = document.getElementById("form-" + acc.dataset.accept);
     const [reason, until] = form.querySelectorAll("input");
-    try { await tbmPost("/api/accept", {fingerprint: acc.dataset.accept, label, reason: reason.value, until: until.value || null});
-          tbmToast({{ _("Risco aceito. Sai da nota no próximo scan.") | tojson }}, "ok"); setTimeout(() => location.reload(), 900); }
+    const fp = acc.dataset.accept, card = acc.closest(".action-card");
+    try { await tbmPost("/api/accept", {fingerprint: fp, label, reason: reason.value, until: until.value || null});
+          await tbmRefresh(card ? ["#" + card.id] : []);
+          tbmToastAction({{ _("Risco aceito. Sai da nota no próximo scan.") | tojson }}, {{ _("Desfazer") | tojson }}, async () => {
+            await tbmPost("/api/unaccept", {fingerprint: fp}); await tbmRefresh(card ? ["#" + card.id] : []); }); }
     catch (err) { tbmToast(err.message, "error"); }
     return;
   }
   const un = e.target.closest("[data-unaccept]");
   if (un && await tbmConfirm({{ _("Desfazer a aceitação?") | tojson }}, {{ _("O achado volta a contar na nota a partir do próximo scan.") | tojson }}, {{ _("Desfazer") | tojson }})) {
-    try { await tbmPost("/api/unaccept", {fingerprint: un.dataset.unaccept}); location.reload(); }
+    const card = un.closest(".action-card");
+    try { await tbmPost("/api/unaccept", {fingerprint: un.dataset.unaccept});
+          if (card) await tbmRefresh(["#" + card.id]); else location.reload(); }
     catch (err) { tbmToast(err.message, "error"); }
   }
 });

@@ -3,55 +3,98 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>{% block title %}threeblindmice{% endblock %}</title>
-<script>/* aplica o tema salvo antes de desenhar (evita piscar) */
-try { var t = localStorage.getItem("tbm-theme"); if (t && t !== "auto") document.documentElement.setAttribute("data-theme", t); } catch (e) {}</script>
+<script>/* tema, modo simples/técnico e barra recolhida aplicados antes de desenhar (evita piscar) */
+try {
+  var d = document.documentElement, t = localStorage.getItem("tbm-theme");
+  if (t && t !== "auto") d.setAttribute("data-theme", t);
+  d.setAttribute("data-mode", localStorage.getItem("tbm-mode") || "tech");
+} catch (e) {}</script>
 <link rel="stylesheet" href="/static/tbm.css?v={{ version }}">
+<link rel="stylesheet" href="/static/tbm-modern.css?v={{ version }}">
 {% if gui %}<meta name="tbm-token" content="{{ csrf_token }}">{% endif %}
-<script>window.TBM_I18N = {{ js_i18n() | tojson }};</script>
+<script>window.TBM_I18N = {{ js_i18n() | tojson }}; window.TBM_GUI = {{ gui | tojson }};</script>
 <script src="/static/tbm.js?v={{ version }}" defer></script>
+<script src="/static/tbm-plus.js?v={{ version }}" defer></script>
 {% block head %}{% endblock %}
 </head>
 <body>
 <a class="skip" href="#main">{{ _("Pular para o conteúdo") }}</a>
 {% include "_icons.svg.j2" %}
-<div class="shell">
-  <header class="topbar">
-    <a class="brand" href="/" aria-label="{{ _("threeblindmice, página inicial") }}">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="gauge-gradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="var(--accent-2)"/><stop offset="1" stop-color="var(--glow)"/>
+    </linearGradient>
+    <linearGradient id="spark-fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+</svg>
+<div class="app" id="app">
+  <aside class="sidebar" aria-label="{{ _('Menu') }}">
+    <a class="brand" href="/" aria-label="{{ _('threeblindmice, página inicial') }}">
       <svg viewBox="0 0 256 256" aria-hidden="true"><use href="#i-logo"/></svg>
       <span>threeblindmice<small>{{ _("Interface local") if gui else _("Dashboard somente leitura") }} · v{{ version }}</small></span>
     </a>
     {% if gui %}
-    <nav class="nav gui" aria-label="{{ _("Principal") }}">
+    <a class="btn new-scan no-print" href="/scan" aria-keyshortcuts="n"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span class="label-text">{{ _("Novo scan") }}</span></a>
+    <nav class="side-nav" aria-label="{{ _('Principal') }}">
       {% for href, icon, text in [("/", "gauge", "Visão geral"), ("/findings", "list", "Achados"), ("/map", "map", "Mapa"),
-                                  ("/inventory", "grid", "Dispositivos"), ("/alerts", "bell", "Alertas"),
-                                  ("/watch", "eye", "Vigia"), ("/features", "book", "Funcionalidades")] %}
-      <a href="{{ href }}" data-nav="{{ href }}"><svg class="icon" aria-hidden="true"><use href="#i-{{ icon }}"/></svg>{{ _(text) }}</a>
+                                  ("/inventory", "grid", "Dispositivos")] %}
+      <a href="{{ href }}" data-nav="{{ href }}" title="{{ _(text) }}"><svg class="icon" aria-hidden="true"><use href="#i-{{ icon }}"/></svg><span class="label-text">{{ _(text) }}</span>
+        {% if href == "/inventory" and nav_unknown() %}<span class="count" title="{{ _('aparelhos não aprovados') }}">{{ nav_unknown() }}</span>{% endif %}</a>
+      {% endfor %}
+      <div class="side-group">{{ _("Configurar") }}</div>
+      {% for href, icon, text in [("/alerts", "bell", "Alertas"), ("/watch", "eye", "Vigia"), ("/features", "book", "Funcionalidades")] %}
+      <a href="{{ href }}" data-nav="{{ href }}" title="{{ _(text) }}"><svg class="icon" aria-hidden="true"><use href="#i-{{ icon }}"/></svg><span class="label-text">{{ _(text) }}</span></a>
       {% endfor %}
     </nav>
-    <a class="btn sm no-print" href="/scan"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>{{ _("Novo scan") }}</a>
     {% else %}
-    <nav class="nav" aria-label="{{ _("Principal") }}">
-      <a href="/" data-nav="/">{{ _("Visão geral") }}</a>
-      {% for l in nav_labels %}<a href="/inventory/{{ l | urlencode }}" data-nav="/inventory/{{ l | urlencode }}">{{ _("Dispositivos") }} · {{ l }}</a>{% endfor %}
+    <nav class="side-nav" aria-label="{{ _('Principal') }}">
+      <a href="/" data-nav="/"><svg class="icon" aria-hidden="true"><use href="#i-gauge"/></svg><span class="label-text">{{ _("Visão geral") }}</span></a>
+      {% for l in nav_labels %}<a href="/inventory/{{ l | urlencode }}" data-nav="/inventory/{{ l | urlencode }}"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span class="label-text">{{ _("Dispositivos") }} · {{ l }}</span></a>{% endfor %}
     </nav>
     {% endif %}
-    <button class="icon-btn no-print" type="button" onclick="tbmCycleTheme()" aria-label="{{ _("Alternar tema: automático, claro ou escuro") }}"
-            data-tip="{{ _("Alternar tema (automático → claro → escuro)") }}"><svg class="icon" aria-hidden="true"><use href="#i-contrast"/></svg></button>
-    {% set other = "en" if get_lang() == "pt" else "pt" %}
-    <a class="icon-btn no-print lang-switch" href="/lang/{{ other }}" hreflang="{{ other }}"
-       aria-label="{{ LANGS[other] }}" data-tip="{{ LANGS[other] }}">{{ other | upper }}</a>
-  </header>
-  <script>
-    document.querySelectorAll("[data-nav]").forEach(a => {
-      const h = a.dataset.nav, p = location.pathname;
-      if (h === "/" ? p === "/" : p.startsWith(h)) a.setAttribute("aria-current", "page");
-    });
-  </script>
-  <main id="main" tabindex="-1">
-    {% if gui %}<div id="update-slot" data-get="/partials/update" data-trigger="load" aria-live="polite"></div>{% endif %}
-    {% block content %}{% endblock %}
-  </main>
+    <div class="side-foot no-print">
+      <button class="icon-btn" type="button" onclick="tbmCycleTheme()" aria-label="{{ _('Alternar tema: automático, claro ou escuro') }}"
+              data-tip="{{ _('Alternar tema (automático → claro → escuro)') }}"><svg class="icon" aria-hidden="true"><use href="#i-contrast"/></svg></button>
+      {% set other = "en" if get_lang() == "pt" else "pt" %}
+      <a class="icon-btn lang-switch" href="/lang/{{ other }}" hreflang="{{ other }}" aria-label="{{ LANGS[other] }}" data-tip="{{ LANGS[other] }}">{{ other | upper }}</a>
+      <button class="icon-btn" type="button" onclick="tbmToggleSidebar()" aria-label="{{ _('Recolher o menu') }}" data-tip="{{ _('Recolher o menu') }}">
+        <svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
+    </div>
+  </aside>
+
+  <div class="content">
+    <header class="topbar2 no-print">
+      <button class="icon-btn menu-btn" type="button" onclick="document.getElementById('app').classList.toggle('menu-open')" aria-label="{{ _('Menu') }}">
+        <svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
+      <button class="search-trigger" type="button" onclick="tbmPalette()" aria-keyshortcuts="Control+K">
+        <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>{{ _("Buscar aparelho, achado ou página…") }}</span><kbd>Ctrl K</kbd></button>
+      <span class="spacer"></span>
+      <button class="mode-toggle" type="button" onclick="tbmToggleMode()" id="mode-toggle"
+              data-simple="{{ _('Modo simples') }}" data-tech="{{ _('Modo técnico') }}"
+              data-tip="{{ _('Simples: só o que fazer e por quê. Técnico: portas, CVEs e evidências.') }}">{{ _("Modo técnico") }}</button>
+      {% if gui %}
+      <button class="icon-btn bell" type="button" onclick="tbmNotifications()" aria-label="{{ _('Notificações') }}" aria-haspopup="true">
+        <svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><span class="dotcount" id="notif-count" hidden></span></button>
+      {% endif %}
+    </header>
+    {% if gui %}<div class="notif-panel" id="notif-panel" hidden role="dialog" aria-label="{{ _('Notificações') }}"></div>{% endif %}
+    <main id="main" tabindex="-1">
+      {% if gui %}<div id="update-slot" data-get="/partials/update" data-trigger="load" aria-live="polite"></div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 </div>
+<script>
+  document.querySelectorAll("[data-nav]").forEach(a => {
+    const h = a.dataset.nav, p = location.pathname;
+    if (h === "/" ? p === "/" : p.startsWith(h)) a.setAttribute("aria-current", "page");
+  });
+  try { if (localStorage.getItem("tbm-sidebar") === "collapsed") document.getElementById("app").classList.add("collapsed"); } catch (e) {}
+</script>
 </body>
 </html>

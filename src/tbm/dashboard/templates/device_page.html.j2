@@ -1,0 +1,94 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ host.name or host.address }} · {{ label }}{% endblock %}
+{% block content %}
+<a class="hint" href="/inventory/{{ label | urlencode }}">← {{ _("Dispositivos") }}</a>
+<section class="card reveal" style="margin-top:12px" id="device" data-identity="{{ host.identity }}">
+  <div class="device-hero">
+    <span class="device-icon {{ sev }}"><svg class="icon xl" aria-hidden="true"><use href="#i-{{ icon }}"/></svg></span>
+    <div style="flex:1;min-width:220px">
+      <h1 id="dev-name">{{ host.name or _("Sem nome") }}</h1>
+      <div class="row hint" style="margin-top:4px">
+        <span>{{ host.device_type | dtype or _("tipo desconhecido") }}</span>
+        {% if model_label(host) %}<span class="cat">{{ model_label(host) }}</span>{% endif %}
+        {% if host.category %}<span class="cat"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg>{{ _(CATEGORIES[host.category]) }}</span>{% endif %}
+        {% if host.trusted %}<span class="badge sev-ok">{{ _("conhecido") }}</span>{% else %}<span class="badge sev-medium">{{ _("não aprovado") }}</span>{% endif %}
+      </div>
+    </div>
+    {% if gui %}
+    <div class="row">
+      {% if not host.trusted %}<button class="btn" type="button" data-identity="{{ host.identity }}" onclick="tbmTrustDevice(this.dataset.identity, true)">{{ _("Aprovar") }}</button>
+      {% else %}<button class="btn subtle" type="button" data-identity="{{ host.identity }}" onclick="tbmTrustDevice(this.dataset.identity, false)">{{ _("Remover aprovação") }}</button>{% endif %}
+      <button class="btn subtle" type="button" data-identity="{{ host.identity }}" data-alias="{{ host.alias or '' }}" onclick="tbmRenameDevice(this.dataset.identity, this.dataset.alias)">{{ _("Renomear") }}</button>
+    </div>
+    {% endif %}
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="label">{{ _("Endereço") }}</div><div class="value mono" style="font-size:18px">{{ host.address }}</div>
+      <div class="sub tech">{{ host.mac or "" }}{% if host.vendor %} · {{ host.vendor }}{% endif %}</div></div>
+    <div class="kpi"><div class="label">{{ _("Visto desde") }}</div><div class="value" style="font-size:18px">{{ first_seen.astimezone().strftime("%d/%m/%Y") if first_seen else "—" }}</div></div>
+    <div class="kpi"><div class="label">{{ _("Problemas abertos") }}</div>
+      <div class="value">{{ findings | rejectattr("accepted") | rejectattr("severity.value", "equalto", "info") | list | length }}</div>
+      {% set sp = mini_path(history.series, 200, 30) %}
+      {% if history.series | length > 1 %}<svg class="spark-big" style="height:30px" viewBox="0 0 {{ sp.w }} {{ sp.h }}" preserveAspectRatio="none" aria-hidden="true">
+        <path class="a" d="{{ sp.area }}"/><path class="l" d="{{ sp.line }}" vector-effect="non-scaling-stroke"/></svg>{% endif %}</div>
+    <div class="kpi tech"><div class="label">{{ _("Portas") }}</div><div class="value">{{ host.services | length }}</div>
+      <div class="sub">{% for s in host.services[:6] %}{{ s.port }}{% if s.transport == "udp" %}/udp{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</div></div>
+  </div>
+</section>
+
+<div class="grid main" style="margin-top:16px">
+  <div>
+    <h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-tool"/></svg>{{ _("O que fazer") }}</h2>
+    {% for a in actions %}
+    <article class="action sev-bar {{ a.severity.value }}">
+      <div style="flex:1"><h3>{{ action_title(a) }}</h3><div class="hint">{{ _(a.why) }}</div>
+        <div class="row" style="margin-top:8px"><span class="badge sev-{{ a.severity.value }}">{{ a.severity | sev }}</span>
+          {% if impact.get(a.key, 0) > 0 %}<span class="impact">+{{ impact[a.key] }} {{ _("pontos") }}</span>{% endif %}
+          <span class="spacer"></span>{% if gui %}<a class="btn sm" href="/fix/{{ label | urlencode }}/{{ a.key }}"><svg class="icon" aria-hidden="true"><use href="#i-wrench"/></svg>{{ _("Corrigir agora") }}</a>{% endif %}</div></div>
+    </article>
+    {% else %}
+    <div class="card empty">{% set sniff = False %}{% include "_mascot.svg.j2" %}<p>{{ _("Nenhum achado neste aparelho.") }}</p></div>
+    {% endfor %}
+
+    <h2 class="section-title tech"><svg class="icon" aria-hidden="true"><use href="#i-list"/></svg>{{ _("Portas") }}</h2>
+    <div class="card tech"><table>
+      {% for s in host.services %}<tr><td class="mono">{{ s.port }}{% if s.transport == "udp" %}/udp{% endif %}</td><td>{{ s.label }}</td>
+        <td class="hint">{% if s.port in host.ipv6_services %}IPv6{% endif %}</td></tr>
+      {% else %}<tr><td class="hint">{{ _("nenhuma aberta") }}</td></tr>{% endfor %}
+    </table>
+    {% if host.ipv6 %}<p class="hint">IPv6: <span class="mono">{{ host.ipv6 | join(", ") }}</span></p>{% endif %}</div>
+  </div>
+
+  <div>
+    <h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg>{{ _("Histórico") }}</h2>
+    <div class="card"><ul class="timeline-list">
+      {% for e in history.events %}<li><div class="hint">{{ e.when }}</div><div>{{ e.text }}</div></li>
+      {% else %}<li>{{ _("Sem mudanças registradas.") }}</li>{% endfor %}
+    </ul></div>
+    {% if gui %}
+    <h2 class="section-title"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg>{{ _("Categoria e notas") }}</h2>
+    <div class="card">
+      <label class="field" for="dev-cat" style="margin-top:0">{{ _("Categoria") }}</label>
+      <select id="dev-cat" style="width:100%">
+        <option value="">{{ _("Sem categoria") }}</option>
+        {% for k, name in CATEGORIES.items() %}<option value="{{ k }}"{% if host.category == k %} selected{% endif %}>{{ _(name) }}</option>{% endfor %}
+      </select>
+      <label class="field" for="dev-note">{{ _("Notas") }}</label>
+      <textarea id="dev-note" class="notes" maxlength="1000" placeholder="{{ _('Ex.: TV da sala, comprada em 2023; senha do Wi-Fi trocada em março.') }}">{{ host.note or "" }}</textarea>
+      <div class="row" style="margin-top:10px"><button class="btn sm" type="button" id="dev-save">{{ _("Salvar") }}</button></div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% if gui %}
+<script>
+document.getElementById("dev-save").addEventListener("click", async () => {
+  try {
+    await tbmPost("/api/device", { identity: document.getElementById("device").dataset.identity,
+                                   category: document.getElementById("dev-cat").value, note: document.getElementById("dev-note").value });
+    tbmToast({{ _("Salvo") | tojson }}, "ok");
+  } catch (e) { tbmToast(e.message, "error"); }
+});
+</script>
+{% endif %}
+{% endblock %}

@@ -1,6 +1,8 @@
 /* threeblindmice · comportamento compartilhado da interface (sem dependências externas). */
 (function () {
   "use strict";
+  /* textos no idioma da interface (window.TBM_I18N vem do base.html.j2) */
+  const tr = s => (window.TBM_I18N || {})[s] || s;
 
   /* ── tema: auto (segue o sistema), claro ou escuro; lembrado só neste navegador ── */
   const THEMES = ["auto", "light", "dark"];
@@ -8,7 +10,7 @@
     if (t === "auto") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", t);
     document.querySelectorAll("[data-theme-label]").forEach(el => {
-      el.textContent = {auto: "Automático", light: "Claro", dark: "Escuro"}[t];
+      el.textContent = tr({auto: "Automático", light: "Claro", dark: "Escuro"}[t]);
     });
   }
   function getTheme() { try { return localStorage.getItem("tbm-theme") || "auto"; } catch (e) { return "auto"; } }
@@ -17,11 +19,8 @@
     const next = THEMES[(THEMES.indexOf(getTheme()) + 1) % THEMES.length];
     try { localStorage.setItem("tbm-theme", next); } catch (e) { /* armazenamento indisponível */ }
     applyTheme(next);
-    tbmToast("Tema: " + {auto: "automático", light: "claro", dark: "escuro"}[next]);
+    tbmToast(tr({auto: "Tema: automático", light: "Tema: claro", dark: "Tema: escuro"}[next]));
   };
-
-  /* ── textos no idioma da interface (window.TBM_I18N vem do base.html.j2) ── */
-  const tr = s => (window.TBM_I18N || {})[s] || s;
 
   /* ── ações autenticadas (o token vem da própria página; outro site não consegue lê-lo) ── */
   window.tbmPost = async function (url, data) {
@@ -92,21 +91,6 @@
       d.showModal();
       input.select();
     });
-  };
-
-  /* ── aparelhos conhecidos ── */
-  window.tbmRenameDevice = async function (identity, current) {
-    const alias = await tbmPrompt(tr("Nome do aparelho"), tr("Como você chama este aparelho? Deixe vazio para voltar ao nome detectado."), current);
-    if (alias === null) return;
-    try { await tbmPost("/api/device", { identity, alias }); location.reload(); }
-    catch (e) { tbmToast(e.message, "error"); }
-  };
-  window.tbmTrustDevice = async function (identity, trusted) {
-    try {
-      await tbmPost("/api/device", { identity, trusted });
-      tbmToast(trusted ? tr("Aparelho aprovado: não vai mais alertar como desconhecido") : tr("Aprovação removida"), "ok");
-      setTimeout(() => location.reload(), 600);
-    } catch (e) { tbmToast(e.message, "error"); }
   };
 
   /* ── painel lateral ── */

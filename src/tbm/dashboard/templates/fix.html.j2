@@ -1,0 +1,105 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ _("Corrigir agora") }} · {{ label }}{% endblock %}
+{% block content %}
+<a class="hint" href="/findings/{{ label | urlencode }}">← {{ _("O que corrigir") }}</a>
+<div class="grid main reveal" style="margin-top:12px">
+  <section class="card">
+    <div class="row" style="align-items:flex-start">
+      <span class="device-icon {{ a.severity.value }}"><svg class="icon lg" aria-hidden="true"><use href="#i-{{ device_icon(a.device_type) }}"/></svg></span>
+      <div style="flex:1;min-width:220px">
+        <h1 style="font-size:22px">{{ action_title(a) }}</h1>
+        <p class="muted" style="margin:6px 0 0">{{ _(a.why) }}</p>
+        <div class="row" style="margin-top:10px">
+          <span class="badge sev-{{ a.severity.value }}">{{ a.severity | sev }}</span>
+          <span class="hint">{{ _("resolve {n} achado(s)", n=a.findings | length) }}</span>
+          {% if projection.gain > 0 %}<span class="impact">+{{ projection.gain }} {{ _("pontos") }}</span>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:22px">{% if guide and guide.brand %}{{ _("Passo a passo no seu {b}", b=guide.brand) }}{% else %}{{ _("Passo a passo") }}{% endif %}</h2>
+    <p class="hint">{{ _("Marque cada passo conforme for fazendo. Quando terminar, peça para o tbm conferir.") }}</p>
+    <ol class="fix-steps" id="steps" data-key="fix-{{ label }}-{{ a.key }}">
+      {% for step in steps %}
+      <li><input type="checkbox" id="st{{ loop.index }}" aria-labelledby="sl{{ loop.index }}"><span id="sl{{ loop.index }}">{{ step }}</span></li>
+      {% else %}
+      <li><span>{{ _("Siga a correção indicada em cada achado abaixo.") }}</span></li>
+      {% endfor %}
+    </ol>
+
+    {% if verifiable %}
+    <div class="row">
+      <button class="btn" id="verify" type="button" data-label="{{ label }}" data-key="{{ a.key }}">
+        <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg>{{ _("Já fiz, verificar") }}</button>
+      <span class="hint">{{ _("Escaneia só este aparelho (alguns segundos) e compara com antes.") }}</span>
+    </div>
+    {% else %}
+    <p class="hint">{{ _("Este item não é de um aparelho específico: rode um novo scan da rede para conferir.") }}</p>
+    {% endif %}
+    <div class="verify-result" id="verify-result" aria-live="polite"></div>
+    {% if gui and a.letter_url(label) %}
+    <p class="hint" style="margin-top:16px">{{ _("Não tem acesso a essa opção?") }}
+      <a href="{{ a.letter_url(label) }}">{{ _("Peça ao provedor com a carta pronta →") }}</a></p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>{{ _("O que esta ação resolve") }}</h2>
+    <ul class="result-list">
+      {% for f in a.findings %}<li><span class="badge sev-{{ f.severity.value }}">{{ f.severity | sev }}</span><span style="flex:1">{{ f.title }}</span>
+        <code class="hint tech">{{ f.location }}</code></li>{% endfor %}
+    </ul>
+    <div class="forecast">
+      <div style="flex:1"><b>{{ _("Nota depois desta ação") }}</b><div class="hint">{{ _("de {a} para {b} pontos", a=scan.score, b=projection.score) }}</div></div>
+      <span class="grades"><span class="grade-{{ scan.grade }}">{{ scan.grade }}</span>→<span class="grade-{{ projection.grade }}">{{ projection.grade }}</span></span>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const T = {{ {"checking": _("Verificando o aparelho…"), "fixed": _("Resolvido"), "still": _("Ainda aparece"),
+               "allgood": _("Tudo resolvido! Nota {a} → {b}."), "partial": _("Nota {a} → {b}. Ainda falta: veja os itens abaixo."),
+               "none": _("Nada mudou ainda. Confira se salvou e reiniciou o aparelho, e tente de novo."), "failed": _("A verificação falhou")} | tojson }};
+  const fmt = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k]);
+  const list = document.getElementById("steps"), key = list.dataset.key;
+  let saved = []; try { saved = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) {}
+  list.querySelectorAll("input").forEach((c, i) => {
+    c.checked = saved.includes(i);
+    c.addEventListener("change", () => {
+      const on = [...list.querySelectorAll("input")].map((x, j) => x.checked ? j : -1).filter(j => j >= 0);
+      try { localStorage.setItem(key, JSON.stringify(on)); } catch (e) {}
+    });
+  });
+  list.querySelectorAll("li").forEach(li => li.addEventListener("click", e => {
+    const c = li.querySelector("input"); if (c && e.target !== c) { c.checked = !c.checked; c.dispatchEvent(new Event("change")); }
+  }));
+  const btn = document.getElementById("verify"), out = document.getElementById("verify-result");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    out.innerHTML = '<div class="row"><div class="radar" style="width:44px;height:44px"></div><b></b></div>';
+    out.querySelector("b").textContent = T.checking;
+    try {
+      const { job } = await tbmPost("/api/verify", { label: btn.dataset.label, key: btn.dataset.key });
+      let j;
+      do { await new Promise(r => setTimeout(r, 800)); j = await (await fetch("/api/jobs/" + job)).json(); } while (j.status === "running" || j.status === "queued");
+      if (j.status !== "done") throw new Error(j.error || T.failed);
+      const v = j.summary.verify, card = document.createElement("div");
+      card.className = v.remaining.length ? "banner warn" : "celebrate";
+      const head = document.createElement("b");
+      head.textContent = !v.resolved.length ? T.none
+        : fmt(v.remaining.length ? T.partial : T.allgood, { a: v.before.grade + " " + v.before.score, b: v.after.grade + " " + v.after.score });
+      const ul = document.createElement("ul"); ul.className = "result-list";
+      for (const [items, ok] of [[v.resolved, true], [v.remaining, false]]) for (const t of items) {
+        const li = document.createElement("li"), tag = document.createElement("span"), txt = document.createElement("span");
+        tag.className = "badge " + (ok ? "sev-ok" : "sev-high"); tag.textContent = ok ? T.fixed : T.still; txt.textContent = t;
+        li.append(tag, txt); ul.append(li);
+      }
+      out.innerHTML = ""; card.append(head); out.append(card, ul);
+      if (v.resolved.length && !v.remaining.length) { tbmConfetti(); try { localStorage.removeItem(key); } catch (e) {} }
+    } catch (err) { out.textContent = ""; tbmToast(err.message, "error"); }
+    finally { btn.disabled = false; }
+  });
+})();
+</script>
+{% endblock %}

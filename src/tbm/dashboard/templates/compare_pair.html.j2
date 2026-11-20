@@ -1,0 +1,23 @@
+<div class="grid cols-3">
+  <div class="card"><div class="hint">{{ _("Antes") }}</div><div class="num" style="font-size:30px;font-weight:750">
+    <span class="grade-{{ old.grade }}">{{ old.grade }}</span> <span class="hint">{{ old.score }}/100</span></div>
+    <div class="hint">{{ old.started_at.astimezone().strftime("%d/%m/%Y %H:%M") }} · {{ old.hosts | length }} {{ _("aparelhos") }}</div></div>
+  <div class="card"><div class="hint">{{ _("Depois") }}</div><div class="num" style="font-size:30px;font-weight:750">
+    <span class="grade-{{ new.grade }}">{{ new.grade }}</span> <span class="hint">{{ new.score }}/100</span></div>
+    <div class="hint">{{ new.started_at.astimezone().strftime("%d/%m/%Y %H:%M") }} · {{ new.hosts | length }} {{ _("aparelhos") }}</div></div>
+  <div class="card"><div class="hint">{{ _("Variação da nota") }}</div>
+    <div class="num" style="font-size:30px;font-weight:750" class="{{ 'ok' if d.score_delta and d.score_delta > 0 else '' }}">
+      {{ "%+d" | format(d.score_delta or 0) }}</div></div>
+</div>
+<div class="grid cols-3" style="margin-top:14px">
+  <div class="card"><h3 style="margin-top:0">✅ {{ _("Resolvidos") }} ({{ d.resolved_findings | length }})</h3>
+    <ul class="hint">{% for f in d.resolved_findings[:12] %}<li>{{ f.title }}</li>{% else %}<li>—</li>{% endfor %}</ul></div>
+  <div class="card"><h3 style="margin-top:0">🆕 {{ _("Novos") }} ({{ d.new_findings | length }})</h3>
+    <ul class="hint">{% for f in d.new_findings[:12] %}<li>{{ f.title }}</li>{% else %}<li>—</li>{% endfor %}</ul></div>
+  <div class="card"><h3 style="margin-top:0">📶 {{ _("Aparelhos") }}</h3>
+    <ul class="hint">
+      {% for h in d.new_hosts[:8] %}<li>+ {{ h.display }}</li>{% endfor %}
+      {% for ip, o, n in d.mac_changes[:5] %}<li>⚠ {{ ip }}: {{ o }} → {{ n }}</li>{% endfor %}
+      {% if not d.new_hosts and not d.mac_changes %}<li>—</li>{% endif %}
+    </ul></div>
+</div>

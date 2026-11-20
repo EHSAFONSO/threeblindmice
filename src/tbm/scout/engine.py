@@ -16,6 +16,7 @@ from tbm.scout.banner import grab_service
 from tbm.scout.classify import classify
 from tbm.scout.discovery import Announcement, default_gateway, local_ipv4, multicast_discover, ping_sweep
 from tbm.scout.ipv6 import is_global_v6, local_global_addresses, open_on_v6, read_neighbors
+from tbm.scout.model import enrich as enrich_model
 from tbm.scout.names import local_name
 from tbm.scout.ports import SERVICE_NAMES
 from tbm.scout.portscan import is_alive, reverse_dns, scan_ports
@@ -81,6 +82,8 @@ class Scout:
         if self.o.mac_lookup and found:
             await self._attach_macs(found)
         self._identify(found)
+        if self.o.banners and found:
+            await enrich_model(found)  # fabricante/modelo/firmware anunciados (UPnP, SNMP)
         if self.o.ipv6 and found:
             await self._attach_ipv6(found)
         for h in found:  # segunda passada: agora com tipo e portas

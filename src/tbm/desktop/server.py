@@ -76,6 +76,34 @@ def read_lock() -> dict[str, Any] | None:
     return None
 
 
+def ask_instance(info: dict[str, Any], path: str, method: str = "POST") -> dict[str, Any] | None:
+    """Chama uma rota da instância aberta, autenticado como a própria interface (cookie + token + Origin)."""
+    base = f"http://127.0.0.1:{info['port']}"
+    try:
+        r = httpx.request(method, base + path, timeout=3, cookies={"tbm_session": info["token"]},
+                          headers={"X-TBM-Token": info["token"], "Origin": base})
+    except httpx.HTTPError:
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        data = r.json()
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def take_over(info: dict[str, Any], timeout: float = 8.0) -> bool:
+    """Pede para a instância antiga sair (ex.: versão diferente) e espera ela soltar o lock."""
+    ask_instance(info, "/api/app/quit")
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if running_instance() is None:
+            return True
+        time.sleep(0.25)
+    return False
+
+
 def running_instance() -> dict[str, Any] | None:
     """Devolve o lock se o servidor dele responde de verdade, senão None.
 

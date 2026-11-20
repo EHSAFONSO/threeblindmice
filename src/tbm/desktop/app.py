@@ -19,7 +19,15 @@ from typing import Any
 from tbm import __version__
 from tbm.dashboard.jobs import Job, JobRunner
 from tbm.dashboard.security import GuiSettings
-from tbm.desktop.server import ServerThread, clear_lock, free_port, running_instance, write_lock
+from tbm.desktop.server import (
+    ServerThread,
+    ask_instance,
+    clear_lock,
+    free_port,
+    running_instance,
+    take_over,
+    write_lock,
+)
 from tbm.squeak import HistoryStore
 
 TITLE = f"threeblindmice {__version__}"
@@ -103,6 +111,80 @@ def app_icon_path() -> str | None:
         return None
 
 
+SPLASH = """<!doctype html><html><head><meta charset="utf-8"><title>{title}</title><style>
+html,body{{margin:0;height:100%;background:#0d1015;color:#e8ebf0;font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif}}
+body{{display:grid;place-content:center;text-align:center;gap:14px}}
+.m{{width:150px;margin:0 auto;animation:b 1.2s ease-in-out infinite}} @keyframes b{{50%{{transform:translateY(-6px)}}}}
+.t{{font-size:22px;font-weight:700;letter-spacing:-.01em}} .s{{color:#9aa6b5;font-size:14px}}
+.bar{{width:180px;height:4px;border-radius:9px;background:#29313c;overflow:hidden;margin:6px auto 0}}
+.bar i{{display:block;width:40%;height:100%;border-radius:9px;background:linear-gradient(90deg,#9b87ff,#5ad480);animation:l 1.1s ease-in-out infinite}}
+@keyframes l{{0%{{transform:translateX(-100%)}}100%{{transform:translateX(260%)}}}}
+@media (prefers-reduced-motion:reduce){{.m,.bar i{{animation:none}}}}
+</style></head><body>
+<svg class="m" viewBox="0 0 240 120" aria-hidden="true">{mice}</svg>
+<div class="t">threeblindmice</div><div class="s">{subtitle}</div><div class="bar"><i></i></div>
+</body></html>"""
+
+_MOUSE = (
+    '<g transform="translate({x} 66) scale({s})"><circle cx="-26" cy="-26" r="17" fill="#9b87ff"/>'
+    '<circle cx="26" cy="-26" r="17" fill="#9b87ff"/><ellipse cx="0" cy="2" rx="34" ry="30" fill="#9b87ff"/>'
+    '<rect x="-27" y="-9" width="22" height="13" rx="6" fill="#0d1015"/><rect x="5" y="-9" width="22" height="13" rx="6" fill="#0d1015"/>'
+    '<path d="M-5 -3h10" stroke="#0d1015" stroke-width="3"/><circle cx="0" cy="16" r="5" fill="#ff9a5c"/></g>'
+)
+
+
+def splash_html() -> str:
+    mice = "".join(_MOUSE.format(x=x, s=s) for x, s in ((52, 0.82), (120, 1), (188, 0.82)))
+    return SPLASH.format(title=TITLE, mice=mice, subtitle="Preparando a interface…")
+
+
+def windows_dark_mode() -> bool:
+    """O Windows está no modo escuro (apps)? Padrão: escuro, como o tema do tbm."""
+    if sys.platform != "win32":
+        return True
+    try:
+        import winreg
+
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+        return not bool(value)
+    except OSError:
+        return True
+
+
+def style_titlebar(title: str, dark: bool | None = None) -> bool:
+    """Barra de título do Windows com as cores do tbm (Windows 11; no 10, só o modo escuro).
+
+    Mantemos a barra nativa (arrastar, encaixar nas bordas, maximizar com duplo
+    clique continuam funcionando) e só pintamos: fundo e texto iguais aos do app.
+    """
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32, dwm = ctypes.windll.user32, ctypes.windll.dwmapi
+    user32.FindWindowW.restype = wintypes.HWND
+    hwnd = user32.FindWindowW(None, title)
+    if not hwnd:
+        return False
+    dark = windows_dark_mode() if dark is None else dark
+
+    def put(attr: int, value: int) -> None:
+        v = ctypes.c_int(value)
+        dwm.DwmSetWindowAttribute(wintypes.HWND(hwnd), attr, ctypes.byref(v), ctypes.sizeof(v))
+
+    def colorref(hex_rgb: str) -> int:
+        r, g, b = (int(hex_rgb[i:i + 2], 16) for i in (1, 3, 5))
+        return r | (g << 8) | (b << 16)
+
+    put(20, int(dark))  # DWMWA_USE_IMMERSIVE_DARK_MODE
+    put(35, colorref("#0d1015" if dark else "#f4f5f8"))  # DWMWA_CAPTION_COLOR (Windows 11)
+    put(36, colorref("#e8ebf0" if dark else "#161a20"))  # DWMWA_TEXT_COLOR
+    put(34, colorref("#29313c" if dark else "#e1e5eb"))  # DWMWA_BORDER_COLOR
+    return True
+
+
 def job_message(job: Job) -> tuple[str, str]:
     """(título, texto) da notificação de fim de scan."""
     if job.status == "error":
@@ -120,11 +202,17 @@ def job_message(job: Job) -> tuple[str, str]:
 class DesktopApp:
     tray_enabled: bool = True
     smoke: bool = False  # teste automático: abre, confere a página e fecha
+    start_hidden: bool = False  # começa só na bandeja (iniciar com o sistema)
+    monitor: Any = None
     window: Any = None
     tray: Any = None
     quitting: bool = False
     hidden_notice_shown: bool = False
     smoke_result: dict[str, Any] = field(default_factory=dict)
+    runner: Any = None
+    store: Any = None
+    base_url: str = ""
+    tray_info: dict[str, Any] = field(default_factory=dict)
 
     # ───────────────────────── bandeja ─────────────────────────
 
@@ -144,6 +232,7 @@ class DesktopApp:
         """Pinta o selo do ícone da bandeja com a cor da nota mais recente."""
         if self.tray is None:
             return
+        self.tray_info.update({"grade": grade, "label": label, "score": score})
         try:
             from tbm.desktop.icon import make_status_icon
 
@@ -164,22 +253,70 @@ class DesktopApp:
             return
 
         def show(path: str | None = None) -> None:
-            self.window.show()
-            self.window.restore()
+            self.show_window()
             if path:
                 self.window.load_url(base_url + path)
 
+        def grade_text(_item: Any) -> str:
+            info = self.tray_info
+            if not info.get("grade"):
+                return "Ainda sem scan"
+            return f"Nota {info['grade']} ({info['score']}/100) · {info['label']}"
+
+        def unknown_text(_item: Any) -> str:
+            n = self.unknown_devices()
+            return f"{n} aparelho(s) não aprovado(s)" if n else "Todos os aparelhos aprovados"
+
         menu = pystray.Menu(
+            pystray.MenuItem(grade_text, lambda: show("/"), enabled=True),
+            pystray.MenuItem(unknown_text, lambda: show("/inventory")),
+            pystray.Menu.SEPARATOR,
             pystray.MenuItem("Abrir threeblindmice", lambda: show(), default=True),
-            pystray.MenuItem("Novo scan", lambda: show("/scan")),
-            pystray.MenuItem("Achados", lambda: show("/findings")),
+            pystray.MenuItem("Escanear agora", lambda: self.scan_now()),
+            pystray.MenuItem("Novo scan…", lambda: show("/scan")),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Sair", lambda: self.quit()),
         )
         self.tray = pystray.Icon("threeblindmice", make_icon(64), "threeblindmice", menu)
         self.tray.run_detached()
 
+    def unknown_devices(self) -> int:
+        if self.store is None:
+            return 0
+        try:
+            label = self.tray_info.get("label")
+            scan = self.store.latest(label) if label else None
+            return sum(1 for h in scan.hosts if not h.trusted) if scan else 0
+        except Exception:  # noqa: BLE001 (menu nunca quebra)
+            return 0
+
+    def scan_now(self) -> None:
+        """Repete o scan da rede pela bandeja, com o mesmo rótulo do último."""
+        if self.runner is None:
+            return
+        from tbm.dashboard.jobs import BusyError, ScanParams
+        from tbm.scout.discovery import suggested_target
+
+        try:
+            self.runner.submit(ScanParams(targets=suggested_target(), label=self.tray_info.get("label") or "casa"))
+            self.notify("Scan iniciado", "Você recebe um aviso aqui quando terminar.")
+        except BusyError:
+            self.notify("Já existe um scan em andamento", "Espere ele terminar.")
+        except Exception as exc:  # noqa: BLE001
+            self.notify("Não foi possível iniciar o scan", str(exc)[:200])
+
     # ───────────────────────── janela ─────────────────────────
+
+    def show_window(self) -> None:
+        if self.window is None:
+            return
+        self.window.show()
+        self.window.restore()
+        try:  # traz para a frente: liga e desliga o "sempre no topo"
+            self.window.on_top = True
+            self.window.on_top = False
+        except Exception:  # noqa: BLE001,S110
+            pass
 
     def _on_closing(self) -> bool:
         if self.quitting or self.tray is None:
@@ -199,13 +336,23 @@ class DesktopApp:
             self.window.destroy()
 
     def _smoke(self) -> None:
-        """Roda dentro do webview.start: espera a página carregar, lê o que importa e fecha."""
-        self.window.events.loaded.wait(30)
+        """Roda depois do boot: espera a interface (não a tela de abertura), lê o que importa e fecha."""
+        import time
+
+        end = time.monotonic() + 30
+        while time.monotonic() < end:
+            try:
+                if self.window.evaluate_js("!!document.querySelector('.side-nav')"):
+                    break
+            except Exception:  # noqa: BLE001,S110 (página trocando)
+                pass
+            time.sleep(0.2)
         try:
             self.smoke_result = {
                 "title": self.window.evaluate_js("document.title"),
                 "path": self.window.evaluate_js("location.pathname"),
-                "nav": self.window.evaluate_js("document.querySelectorAll('nav.gui a').length"),
+                "nav": self.window.evaluate_js("document.querySelectorAll('.side-nav a').length"),
+                "titlebar": style_titlebar(TITLE),
                 "app_id": current_windows_app_id(),
                 "window_icon": window_icon_is_custom(TITLE),
             }
@@ -225,33 +372,56 @@ class DesktopApp:
 
         existing = running_instance()
         if existing and not self.smoke:
-            # Já existe um app aberto: só abrimos outra janela para ele.
-            url = f"http://127.0.0.1:{existing['port']}/?token={existing['token']}"
-            self.window = webview.create_window(TITLE, url, width=1200, height=820, min_size=(760, 520))
-            webview.start(private_mode=True, icon=icon)
-            return 0
+            # Já existe um app aberto. Mesma versão: só trazemos a janela dele para a frente e saímos
+            # (antes abríamos outra janela, e ficavam dois processos). Versão diferente, ou uma
+            # instância antiga que não sabe se mostrar: pedimos para ela sair e assumimos.
+            version = (ask_instance(existing, "/api/app/version", method="GET") or {}).get("version")
+            if version == __version__ and ask_instance(existing, "/api/app/show"):
+                return 0
+            take_over(existing)
 
         from tbm.dashboard import create_app
 
         settings = GuiSettings(port=free_port())
-        store = HistoryStore()
-        app = create_app(store, gui=settings, runner=JobRunner(store, on_done=self.on_job_done))
+        self.store = store = HistoryStore()
+        self.runner = JobRunner(store, on_done=self.on_job_done)
+        app = create_app(store, gui=settings, runner=self.runner)
+        app.state.desktop = {"show": self.show_window, "quit": self.quit}
         server = ServerThread(app, settings.port)
-        server.start()
-        write_lock(settings.port, settings.token)
-        base_url = f"http://127.0.0.1:{settings.port}"
+        self.base_url = base_url = f"http://127.0.0.1:{settings.port}"
+
+        def boot() -> None:
+            # A janela já está na tela com a abertura; o servidor sobe enquanto isso.
+            server.start()
+            write_lock(settings.port, settings.token)
+            style_titlebar(TITLE)
+            self.window.load_url(settings.login_url())
+            if self.start_hidden and self.tray is not None:
+                threading.Thread(target=self.window.hide, daemon=True).start()  # só a bandeja
+            if self.smoke:
+                self._smoke()
+
         try:
-            self.window = webview.create_window(TITLE, settings.login_url(), width=1200, height=820,
-                                                min_size=(760, 520))
+            self.window = webview.create_window(TITLE, html=splash_html(), width=1240, height=840,
+                                                min_size=(760, 520), background_color="#0d1015",
+                                                hidden=self.start_hidden)
             self.window.events.closing += self._on_closing
+            self.window.events.shown += lambda: style_titlebar(TITLE)
             if not self.smoke:
                 self._start_tray(base_url)
                 latest = max(store.labels(), key=lambda r: r["started_at"], default=None)
                 if latest is not None:
                     self.set_tray_grade(latest["grade"], latest["label"], latest["score"])
+                if self.tray is not None:  # vigia em tempo real só quando há bandeja para avisar
+                    from tbm.desktop.monitor import LiveMonitor
+
+                    self.monitor = LiveMonitor(store, self.notify)
+                    self.monitor.start()
             # private_mode: o cookie de sessão não sobrevive ao app (o token muda a cada execução).
-            webview.start(self._smoke if self.smoke else None, private_mode=True, icon=icon)
+            webview.start(boot, private_mode=True, icon=icon)
         finally:
+            if self.monitor is not None:
+                self.monitor.stop()
             if self.tray is not None:
                 self.tray.stop()
             server.stop()

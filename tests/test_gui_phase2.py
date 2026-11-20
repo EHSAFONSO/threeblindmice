@@ -32,7 +32,7 @@ def test_notify_precedence_env_over_config(monkeypatch):
 
 def test_describe_never_leaks_secrets():
     tg = config.describe(f"tg://{TOKEN}/123456")
-    assert tg == {"kind": "telegram", "label": "Telegram · chat 123456"} and "AAAA" not in str(tg)
+    assert tg == {"kind": "telegram", "label": "Telegram · chat ••••3456"} and "AAAA" not in str(tg)
     hook = config.describe("https://discord.com/api/webhooks/1/SEGREDO")
     assert "SEGREDO" not in hook["label"] and hook["kind"] == "discord"
     ntfy = config.describe("ntfy://tbm-abcdef123")
@@ -68,7 +68,7 @@ def test_scheduled_runner_writes_log_without_console():
     spec.parent.mkdir(parents=True)
     spec.write_text(json.dumps({"label": "casa", "argv": ["checks"]}), encoding="utf-8")
     assert main(["casa"]) == 0
-    log = schedule.read_log("casa")
+    log = schedule.read_log("casa", 200)
     assert "início do scan agendado 'casa'" in log and "cve.nvd" in log and "fim · código 0" in log
 
 

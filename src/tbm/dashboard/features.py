@@ -81,6 +81,24 @@ CHECKS: dict[str, CheckInfo] = {
     "network.external": CheckInfo(
         "O que a internet vê do seu IP público, segundo o Shodan (só com Verificações externas).",
         "É a visão do atacante: portas que qualquer um alcança de fora, sem precisar estar na sua rede."),
+    "network.default-pass": CheckInfo(
+        "Lembra de conferir a senha de administração de roteadores e câmeras (não testa senha nenhuma).",
+        "Senha de fábrica é pública e é um dos primeiros alvos numa rede doméstica."),
+    "iot.rtsp": CheckInfo(
+        "Se a câmera entrega o vídeo (RTSP) sem pedir senha.",
+        "Câmera sem senha deixa qualquer um assistir ao vivo."),
+    "iot.mqtt": CheckInfo(
+        "Se o broker MQTT da casa inteligente aceita conexão anônima.",
+        "Sem senha, qualquer um lê o estado da casa e manda comandos (abrir, ligar, desligar)."),
+    "network.evil-twin": CheckInfo(
+        "Uma rede Wi-Fi aberta usando o mesmo nome da sua (golpe do gêmeo maligno).",
+        "Seus aparelhos podem se conectar a ela por engano e entregar o tráfego ao atacante."),
+    "network.rogue-dhcp": CheckInfo(
+        "Mais de um servidor DHCP respondendo na rede.",
+        "Um DHCP intruso entrega gateway ou DNS falso e intercepta o tráfego."),
+    "iot.services": CheckInfo(
+        "Serviços de casa conectada visíveis: impressora na 9100, Home Assistant, gravadores de câmera.",
+        "Alguns desses aparelhos têm falhas conhecidas e nunca deveriam ficar expostos à internet."),
 }
 
 

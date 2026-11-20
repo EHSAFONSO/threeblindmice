@@ -44,8 +44,15 @@ def python_keys() -> set[str]:
 
 
 def all_keys() -> set[str]:
+    from tbm.dashboard.app import CATEGORIES, SEV_NAMES
+    from tbm.dashboard.features import TOOLS, catalog
+
     kinds = {s for k in KINDS.values() for s in (k.title, k.why)}
-    return template_keys() | python_keys() | kinds | set(i18n.EXTRA_KEYS) | set(i18n.js_catalog())
+    features = {s for f in TOOLS for s in (f.title, f.description)}
+    features |= {r[k] for r in catalog() for k in ("name", "mode", "what", "why") if r[k]}
+    names = set(CATEGORIES.values()) | {v for v in SEV_NAMES.values() if v != "info"}
+    return (template_keys() | python_keys() | kinds | features | names | set(i18n.EXTRA_KEYS)
+            | set(i18n.js_catalog()))
 
 
 def test_every_marked_string_is_translated():

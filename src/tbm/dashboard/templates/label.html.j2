@@ -2,6 +2,8 @@
   <div class="row" style="margin-bottom:6px">
     <h2 style="margin:0">{{ _("Linha do tempo") }} · {{ label }}</h2><span class="spacer"></span>
     <span class="hint">{{ _("pontos cheios = algo mudou · passe o mouse ou use Tab para detalhes") }}</span>
+    {% if gui %}<a class="btn sm subtle" href="/compare/{{ label | urlencode }}">{{ _("Comparar scans") }}</a>
+    <a class="btn sm subtle" href="/report/{{ label | urlencode }}">{{ _("Relatório para a família") }}</a>{% endif %}
   </div>
   <svg class="chart" viewBox="0 0 {{ t.w }} {{ t.h }}" role="img" aria-label="{{ _("Evolução da nota de {l}", l=label) }}">
     <rect x="{{ t.left }}" y="{{ t.band_good.y }}" width="{{ t.right - t.left }}" height="{{ t.band_good.h }}" class="band-good"/>

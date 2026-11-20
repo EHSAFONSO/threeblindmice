@@ -57,12 +57,33 @@ def build_summary(store: HistoryStore, label: str, now: datetime | None = None) 
         unknown = [h for h in d.new_hosts if not h.trusted]
         if unknown:
             lines.append("⚠ Aparelhos novos ainda não aprovados: " + ", ".join(h.display for h in unknown[:5]))
+    expiring = expiring_acceptances(store, now)
+    if expiring:
+        lines.append(f"⏰ {len(expiring)} risco(s) aceito(s) vencendo em até 7 dias: " + ", ".join(expiring[:5]))
     actions = build_actions(current)
     if actions:
         lines.append(f"👉 Próximo passo: {actions[0].title} (resolve {len(actions[0].findings)} achado(s))")
     else:
         lines.append("👏 Nada pendente para corrigir.")
     return "\n".join(lines)
+
+
+def expiring_acceptances(store: HistoryStore, now: datetime | None = None, days: int = 7) -> list[str]:
+    """Títulos dos riscos aceitos cujo prazo (until) vence nos próximos `days` dias."""
+    from datetime import datetime, timedelta
+
+    today = (now or utcnow()).date()
+    out = []
+    for row in store.acceptances().values():
+        if not row["until"]:
+            continue
+        try:
+            due = datetime.strptime(row["until"], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if today <= due <= today + timedelta(days=days):
+            out.append(row["title"] or row["fingerprint"][:8])
+    return out
 
 
 def _delta(baseline: ScanResult | None, current: ScanResult) -> str:

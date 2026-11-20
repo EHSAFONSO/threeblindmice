@@ -1,46 +1,44 @@
 {% extends "base.html.j2" %}
-{% block title %}Funcionalidades · threeblindmice{% endblock %}
+{% block title %}{{ _("Funcionalidades") }} · threeblindmice{% endblock %}
 {% block content %}
-{% if get_lang() == "en" %}<div class="banner" style="margin-bottom:14px" role="note">This page is only available in Portuguese for now.</div>{% endif %}
 <style>
-  .tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-  .tool { border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .tool { display: flex; flex-direction: column; }
   .tool h3 { margin: 0 0 6px; font-size: 15px; }
-  .tool code { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); word-break: break-all; }
-  .mode { font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 1px 8px; border-radius: 99px;
-          border: 1px solid var(--line); }
+  .tool code { display: block; margin-top: auto; padding-top: 10px; font-size: 12px; color: var(--muted); word-break: break-all; }
+  .mode { font-size: 11.5px; font-weight: 700; padding: 1px 9px; border-radius: 99px; border: 1px solid var(--line); }
   .mode.ativo { border-color: var(--medium); color: var(--medium); }
 </style>
 
-<section class="card" style="margin-top:18px">
-  <h2>O que o threeblindmice faz</h2>
-  <p class="hint">São três "ratos": o <b>Scout</b> descobre os aparelhos e serviços, o <b>Sniffer</b> analisa os riscos
-    e o <b>Squeak</b> dá a nota, compara com scans anteriores e avisa você. Cada recurso abaixo também tem um comando
-    equivalente para a linha de comando.</p>
-  <div class="tools">
-    {% for t in tools %}
-    <div class="tool">
-      <h3>{% if t.link %}<a href="{{ t.link }}">{{ t.title }}</a>{% else %}{{ t.title }}{% endif %}</h3>
-      <div>{{ t.description }}</div>
-      <code>{{ t.cli }}</code>
-    </div>
-    {% endfor %}
+<div class="row" style="gap:18px;align-items:center">
+  <div style="flex:1;min-width:260px">
+    <h1>{{ _("O que o threeblindmice faz") }}</h1>
+    <p class="muted" style="margin:6px 0 0">{{ _("São três ratos: o Scout descobre os aparelhos e serviços, o Sniffer analisa os riscos e o Squeak dá a nota, compara com scans anteriores e avisa você. Cada recurso abaixo também tem um comando equivalente para a linha de comando.") }}</p>
   </div>
-</section>
+  {% set sniff = False %}<div style="width:170px">{% include "_mascot.svg.j2" %}</div>
+</div>
 
-<section class="card">
-  <h2>Verificações ({{ checks | length }})</h2>
-  <p class="hint"><b>Passivas</b> só observam o que o serviço mostra. <b>Ativas</b> interagem (ex.: tentam login anônimo)
-    e só rodam com "Testes ativos" ligado.</p>
+<div class="grid cols-3 reveal" style="margin-top:18px">
+  {% for t in tools %}
+  <div class="card tool">
+    <h3>{% if t.link %}<a href="{{ t.link }}">{{ _(t.title) }}</a>{% else %}{{ _(t.title) }}{% endif %}</h3>
+    <div class="hint">{{ _(t.description) }}</div>
+    <code class="tech">{{ t.cli }}</code>
+  </div>
+  {% endfor %}
+</div>
+
+<section class="card" style="margin-top:18px">
+  <h2>{{ _("Verificações") }} ({{ checks | length }})</h2>
+  <p class="hint">{{ _("Passivas só observam o que o serviço mostra. Ativas interagem (ex.: tentam login anônimo) e só rodam com Testes ativos ligado.") }}</p>
   <div class="table-wrap">
   <table>
-    <thead><tr><th>Verificação</th><th>O que verifica</th><th>Por que importa</th></tr></thead>
+    <thead><tr><th>{{ _("Verificação") }}</th><th>{{ _("O que verifica") }}</th><th>{{ _("Por que importa") }}</th></tr></thead>
     <tbody>
     {% for c in checks %}
       <tr>
-        <td><b>{{ c.name }}</b><br><span class="mode {{ c.mode.split()[0] }}">{{ c.mode }}</span><br><code class="hint">{{ c.id }}</code></td>
-        <td>{{ c.what }}</td>
-        <td class="hint">{{ c.why }}</td>
+        <td><b>{{ _(c.name) }}</b><br><span class="mode {{ c.mode.split()[0] }}">{{ _(c.mode) }}</span><br><code class="hint tech">{{ c.id }}</code></td>
+        <td>{{ _(c.what) }}</td>
+        <td class="hint">{{ _(c.why) }}</td>
       </tr>
     {% endfor %}
     </tbody>

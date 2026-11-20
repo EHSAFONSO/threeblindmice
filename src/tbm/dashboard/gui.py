@@ -14,10 +14,10 @@ from typing import Literal
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ValidationError, field_validator
 
-from tbm import schedule
+from tbm import config, schedule
 from tbm.config import describe, notify_target, persist_notify
 from tbm.dashboard.features import TOOLS, catalog
 from tbm.dashboard.jobs import BusyError, JobRunner, ScanParams
@@ -65,6 +65,24 @@ class DeviceBody(BaseModel):
     identity: str
     alias: str | None = None
     trusted: bool | None = None
+    category: str | None = None
+    note: str | None = None
+
+    @field_validator("category")
+    @classmethod
+    def _category(cls, v: str | None) -> str | None:
+        from tbm.dashboard.app import CATEGORIES
+
+        if v not in (None, "") and v not in CATEGORIES:
+            raise ValueError("categoria inválida")
+        return v
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > 1000:
+            raise ValueError("nota com até 1000 caracteres")
+        return v
 
     @field_validator("identity")
     @classmethod
@@ -195,11 +213,18 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
     # ───────────────────────── novo scan ─────────────────────────
 
     @app.get("/scan", response_class=HTMLResponse)
-    def scan_form() -> HTMLResponse:
+    async def scan_form() -> HTMLResponse:
+        from tbm.pipeline import current_network_label
+        from tbm.scout.discovery import local_networks
+
         current = runner.current
         running = current.id if current and current.status in ("queued", "running") else None
-        return render("scan.html.j2", suggested=suggested_target(), label=latest_label() or "casa",
-                      running=running)
+        try:  # rede conhecida? (pelo MAC do roteador) Sugere o mesmo histórico
+            known = await asyncio.wait_for(current_network_label(store), 5)
+        except (TimeoutError, OSError):
+            known = None
+        return render("scan.html.j2", suggested=suggested_target(), label=known or latest_label() or "casa",
+                      running=running, known_network=known, networks=local_networks())
 
     @app.post("/api/scan")
     async def start_scan(request: Request) -> JSONResponse:
@@ -245,8 +270,11 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
         actions = build_actions(scan)
         info = [f for f in scan.findings if f.severity is Severity.INFO]
         accepted = [f for f in scan.findings if f.accepted]
+        from tbm.squeak.actions import impacts
+
         return render("findings.html.j2", label=label, scan=scan, actions=actions, info=info, accepted=accepted,
-                      pending=pending, progress=progress(history, scan), labels=[r["label"] for r in store.labels()])
+                      pending=pending, progress=progress(history, scan), labels=[r["label"] for r in store.labels()],
+                      impact=impacts(scan, actions))
 
     @app.post("/api/accept")
     async def accept(request: Request) -> JSONResponse:
@@ -268,10 +296,86 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
             body = DeviceBody.model_validate(await request.json())
         except ValidationError as exc:
             return JSONResponse({"error": _errors(exc)}, status_code=400)
-        if body.alias is None and body.trusted is None:
+        if body.alias is None and body.trusted is None and body.category is None and body.note is None:
             return JSONResponse({"error": "nada para alterar"}, status_code=400)
-        store.set_device(body.identity, alias=body.alias, trusted=body.trusted)
+        previous = store.devices().get(body.identity)
+        store.set_device(body.identity, alias=body.alias, trusted=body.trusted, category=body.category, note=body.note)
+        # devolve o estado anterior: a interface usa para o "Desfazer"
+        before = {k: previous[k] for k in ("alias", "category", "note")} if previous else {}
+        if previous:
+            before["trusted"] = bool(previous["trusted"])
+        return JSONResponse({"ok": True, "before": before})
+
+    # ───────────────────────── app de desktop (instância única) ─────────────────────────
+
+    @app.post("/api/app/show")
+    async def app_show(request: Request) -> JSONResponse:
+        from tbm import __version__
+
+        hooks = getattr(request.app.state, "desktop", None)
+        if not hooks:
+            return JSONResponse({"error": "sem janela"}, status_code=404)
+        await asyncio.to_thread(hooks["show"])
+        return JSONResponse({"ok": True, "version": __version__})
+
+    @app.post("/api/app/quit")
+    async def app_quit(request: Request) -> JSONResponse:
+        hooks = getattr(request.app.state, "desktop", None)
+        if not hooks:
+            return JSONResponse({"error": "sem janela"}, status_code=404)
+        import threading
+
+        threading.Timer(0.2, hooks["quit"]).start()  # responde antes de fechar
         return JSONResponse({"ok": True})
+
+    @app.get("/api/app/version")
+    def app_version() -> JSONResponse:
+        from tbm import __version__
+
+        return JSONResponse({"version": __version__})
+
+    # ───────────────────────── notificações ─────────────────────────
+
+    @app.get("/api/notifications/count")
+    def notifications_count() -> JSONResponse:
+        return JSONResponse({"unread": store.unread_events()})
+
+    @app.get("/partials/notifications", response_class=HTMLResponse)
+    def notifications_panel() -> HTMLResponse:
+        events = store.events(30)
+        store.mark_events_read()
+        return render("notifications.html.j2", events=events)
+
+    # ───────────────────────── corrigir agora ─────────────────────────
+
+    @app.get("/fix/{label}/{key}", response_class=HTMLResponse)
+    def fix_page(label: str, key: str) -> Response:
+        from tbm.squeak.actions import project
+        from tbm.squeak.guides import guide_for
+
+        scan = store.latest(label)
+        action = next((a for a in build_actions(scan) if a.key == key), None) if scan else None
+        if scan is None or action is None:
+            return RedirectResponse(f"/findings/{label}", status_code=303)  # já resolvida ou não existe mais
+        guide = guide_for(action.kind, scan.host(action.host), scan.gateway)
+        steps = guide.steps if guide else list(dict.fromkeys(f.remediation for f in action.findings if f.remediation))
+        verifiable = action.host not in ("local", "wifi") and scan.host(action.host) is not None
+        return render("fix.html.j2", label=label, scan=scan, a=action, guide=guide, steps=steps,
+                      projection=project(scan, [action]), verifiable=verifiable)
+
+    @app.post("/api/verify")
+    async def verify(request: Request) -> JSONResponse:
+        body = await request.json()
+        label, key = str(body.get("label", "")), str(body.get("key", ""))
+        scan = store.latest(label)
+        action = next((a for a in build_actions(scan) if a.key == key), None) if scan else None
+        if scan is None or action is None or scan.host(action.host) is None:
+            return JSONResponse({"error": "ação não encontrada no último scan"}, status_code=404)
+        try:
+            job = runner.submit_verify(label, action.host, [f.fingerprint for f in action.findings])
+        except BusyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse({"job": job.id}, status_code=202)
 
     @app.post("/api/unaccept")
     async def unaccept(request: Request) -> JSONResponse:
@@ -296,8 +400,10 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
         target, source = notify_target()
         from tbm.squeak import summary
 
+        q = config.quiet_hours()
         return render("alerts.html.j2", current=describe(target), source=source,
-                      suggested_topic=f"tbm-{secrets.token_hex(5)}", weekly=summary.enabled())
+                      suggested_topic=f"tbm-{secrets.token_hex(5)}", weekly=summary.enabled(),
+                      quiet_start=q[0] if q else "", quiet_end=q[1] if q else "")
 
     @app.post("/api/alerts/summary")
     async def alerts_summary(request: Request) -> JSONResponse:
@@ -322,6 +428,22 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
         except httpx.HTTPError:
             return JSONResponse({"error": "sem conexão com o Telegram"}, 502)
         return JSONResponse({"bot": bot, "chats": [{"id": c.id, "title": c.title, "kind": c.kind} for c in chats]})
+
+    @app.post("/api/alerts/quiet")
+    async def alerts_quiet(request: Request) -> JSONResponse:
+        body = await request.json()
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "corpo inválido"}, status_code=400)
+        start, end = str(body.get("start", "")), str(body.get("end", ""))
+        data = config.load()
+        if start and end:
+            if not (re.fullmatch(r"\d{2}:\d{2}", start) and re.fullmatch(r"\d{2}:\d{2}", end)):
+                return JSONResponse({"error": "use HH:MM"}, status_code=400)
+            data["quiet_start"], data["quiet_end"] = start, end
+        else:
+            data.pop("quiet_start", None), data.pop("quiet_end", None)
+        config.save(data)
+        return JSONResponse({"ok": True})
 
     @app.post("/api/alerts/save")
     async def alerts_save(request: Request) -> JSONResponse:
@@ -359,9 +481,25 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
         if not re.fullmatch(r"[\w.-]{1,40}", label):
             raise HTTPException(400, "rótulo inválido")
         last = store.latest(label)
+        from tbm.desktop import autostart
+
         return render("watch.html.j2", label=label, st=schedule.status(sys.platform, label),
                       log=schedule.read_log(label), suggested=suggested_target(), last=last,
-                      notify=describe(notify_target()[0]), platform=sys.platform)
+                      notify=describe(notify_target()[0]), platform=sys.platform,
+                      autostart_on=autostart.is_enabled(), autostart_ok=autostart.supported())
+
+    @app.post("/api/watch/autostart")
+    async def watch_autostart(request: Request) -> JSONResponse:
+        from tbm.desktop import autostart
+
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            return JSONResponse({"error": "envie {enabled: true|false}"}, status_code=400)
+        try:
+            autostart.enable() if body["enabled"] else autostart.disable()
+        except OSError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse({"ok": True, "enabled": autostart.is_enabled()})
 
     @app.post("/api/watch/install")
     async def watch_install(request: Request) -> JSONResponse:

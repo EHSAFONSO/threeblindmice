@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS devices (
     trusted    INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS events (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    at    TEXT NOT NULL,
+    kind  TEXT NOT NULL,           -- scan_done, unknown_device, resolved, alert_sent, verify
+    label TEXT,
+    data  TEXT NOT NULL,           -- JSON com os valores do texto (traduzido na hora de mostrar)
+    link  TEXT,
+    read  INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -61,6 +70,10 @@ class HistoryStore:
             for col, kind in COLUMNS.items():
                 if col not in existing:
                     conn.execute(f"ALTER TABLE scans ADD COLUMN {col} {kind}")
+            dev_cols = {row["name"] for row in conn.execute("PRAGMA table_info(devices)")}
+            for col in ("category", "note"):
+                if col not in dev_cols:
+                    conn.execute(f"ALTER TABLE devices ADD COLUMN {col} TEXT")
         private_file(self.path)
 
     def _conn(self) -> sqlite3.Connection:
@@ -127,14 +140,23 @@ class HistoryStore:
         with self._conn() as conn:
             return {r["identity"]: r for r in conn.execute("SELECT * FROM devices")}
 
-    def set_device(self, identity: str, *, alias: str | None = None, trusted: bool | None = None) -> None:
-        """Atualiza só o que foi passado (alias "" apaga o nome)."""
+    def set_device(self, identity: str, *, alias: str | None = None, trusted: bool | None = None,
+                   category: str | None = None, note: str | None = None) -> None:
+        """Atualiza só o que foi passado ("" apaga o nome, a categoria ou a nota)."""
         current = self.devices().get(identity)
-        new_alias = (alias.strip() or None) if alias is not None else (current["alias"] if current else None)
+
+        def keep(new: str | None, col: str) -> str | None:
+            if new is not None:
+                return new.strip() or None
+            return current[col] if current else None
+
         new_trusted = int(trusted) if trusted is not None else (current["trusted"] if current else 0)
         with self._conn() as conn:
-            conn.execute("INSERT OR REPLACE INTO devices VALUES (?,?,?,?)",
-                         (identity, new_alias, new_trusted, datetime.now(UTC).isoformat()))
+            conn.execute(
+                "INSERT OR REPLACE INTO devices (identity, alias, trusted, updated_at, category, note) "
+                "VALUES (?,?,?,?,?,?)",
+                (identity, keep(alias, "alias"), new_trusted, datetime.now(UTC).isoformat(),
+                 keep(category, "category"), keep(note, "note")))
 
     def _hydrate(self, result: ScanResult) -> ScanResult:
         """Aplica nomes e aprovações atuais, inclusive em scans antigos."""
@@ -142,7 +164,34 @@ class HistoryStore:
         for h in result.hosts:
             if row := known.get(h.identity):
                 h.alias, h.trusted = row["alias"], bool(row["trusted"])
+                h.category, h.note = row["category"], row["note"]
         return result
+
+    # ───────────────────────── notificações ─────────────────────────
+
+    def add_event(self, kind: str, data: dict, *, label: str | None = None, link: str | None = None) -> None:
+        import json
+
+        with self._conn() as conn:
+            conn.execute("INSERT INTO events (at, kind, label, data, link) VALUES (?,?,?,?,?)",
+                         (datetime.now(UTC).isoformat(), kind, label, json.dumps(data, ensure_ascii=False), link))
+            # guarda só as 200 mais recentes
+            conn.execute("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 200)")
+
+    def events(self, limit: int = 30) -> builtins.list[dict]:
+        import json
+
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return [{**dict(r), "data": json.loads(r["data"])} for r in rows]
+
+    def unread_events(self) -> int:
+        with self._conn() as conn:
+            return conn.execute("SELECT COUNT(*) FROM events WHERE read = 0").fetchone()[0]
+
+    def mark_events_read(self) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE events SET read = 1 WHERE read = 0")
 
     def meta(self, key: str) -> str | None:
         with self._conn() as conn:

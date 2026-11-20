@@ -215,4 +215,40 @@ class UPnPIGDCheck(Check):
                 remediation="Se ninguém da casa depende de UPnP, desative-o na administração do roteador.",
             ))
             findings += [mapping_finding(self.id, host, m) for m in mappings]
+            if nat := nat_finding(self.id, host, external):
+                findings.append(nat)
         return findings
+
+
+def nat_finding(check_id: str, host: Host, external: str) -> Finding | None:
+    """O IP "externo" do roteador não é público? Então há outro NAT na frente (modem ou CGNAT)."""
+    import ipaddress
+
+    try:
+        ip = ipaddress.ip_address(external)
+    except ValueError:
+        return None
+    if ip in ipaddress.ip_network("100.64.0.0/10"):
+        return Finding(
+            check_id=check_id, key="cgnat", severity=Severity.INFO, host=host.address,
+            title="Sua operadora usa CGNAT (IP público compartilhado)",
+            description=("O IP do lado de fora do roteador é da faixa 100.64.0.0/10, reservada para CGNAT: a "
+                         "operadora divide um IP público entre vários clientes. Isso esconde a sua rede da "
+                         "internet (bom), mas impede abrir portas para acesso remoto e pode fazer o seu IP "
+                         "público aparecer em listas de bloqueio por causa de outros clientes."),
+            evidence=f"IP externo do roteador: {external}",
+            remediation="Nada a corrigir. Para acesso remoto, use uma VPN de saída (Tailscale, WireGuard).",
+        )
+    if ip.is_private:
+        return Finding(
+            check_id=check_id, key="double-nat", severity=Severity.INFO, host=host.address,
+            title="NAT duplo confirmado: há outro roteador entre este e a internet",
+            description=("O IP do lado de fora deste roteador é privado, então outro aparelho (normalmente o "
+                         "modem da operadora) faz NAT antes dele. Funciona, mas complica jogos, chamadas e "
+                         "redirecionamentos de porta, e as configurações de segurança precisam ser revistas "
+                         "nos DOIS aparelhos."),
+            evidence=f"IP externo do roteador: {external}",
+            remediation=("Peça à operadora para colocar o modem em modo bridge, ou ligue o seu roteador na "
+                         "DMZ do modem. Confira UPnP e acesso remoto nos dois."),
+        )
+    return None
