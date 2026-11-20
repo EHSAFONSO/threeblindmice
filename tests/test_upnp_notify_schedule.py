@@ -193,7 +193,7 @@ def test_notify_test_cli_never_prints_the_token(monkeypatch):
     async def fake_send(url):
         return 401
 
-    monkeypatch.setattr("tbm.cli.send_test", fake_send)
+    monkeypatch.setattr("tbm.cli.alerts.send_test", fake_send)
     monkeypatch.setenv("TBM_WEBHOOK", "tg://999:SEGREDO/1")
     result = CliRunner().invoke(app, ["notify-test"])
     assert result.exit_code == 2 and "token inválido" in result.output

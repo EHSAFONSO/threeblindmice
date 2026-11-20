@@ -1,30 +1,33 @@
-"""Alertas: Discord, Slack, Telegram, ntfy ou webhook JSON genérico.
+"""Alertas: Discord, Slack, Telegram, ntfy, Pushover, Home Assistant, e-mail ou webhook JSON genérico.
 
 Só dispara quando há algo *novo* de severidade ≥ mínima. Alerta que toca
 toda vez acaba ignorado.
 
-Formatos de destino aceitos em --notify / TBM_WEBHOOK:
+Formatos de destino aceitos em --notify / TBM_WEBHOOK (cada um é um `Notifier`,
+ver tbm/squeak/notifiers.py):
 - https://discord.com/api/webhooks/...      → Discord
 - https://hooks.slack.com/services/...      → Slack
 - tg://<token-do-bot>/<chat_id>             → Telegram (Bot API)
 - ntfy://<tópico>  ou  https://ntfy.sh/<tópico>  → ntfy (push grátis no celular)
+- pushover://<app_token>@<user_key>         → Pushover
+- hass://<host>/<webhook_id>                → Home Assistant
+- smtp://usuario:senha@servidor:587/destino@exemplo.com → e-mail
 - qualquer outra URL https                  → POST com JSON completo
 """
 
 from __future__ import annotations
 
-import asyncio
-import re
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
-from tbm import USER_AGENT
 from tbm.models import Finding, PortKey, ScanResult, Severity
 from tbm.squeak.diff import ScanDiff
+from tbm.squeak.notifiers import Delivery, notifier_for, send_email
+
+__all__ = ["Delivery", "build_delivery", "build_message", "build_payload", "in_quiet_hours", "port_label",
+           "relevant", "send_email", "send_test", "send_text", "send_webhook", "text_delivery"]
 
 
 def port_label(port: PortKey) -> str:
@@ -63,24 +66,15 @@ def build_message(result: ScanResult, diff: ScanDiff, items: list[Finding]) -> s
     return "\n".join(lines)
 
 
-@dataclass
-class Delivery:
-    """Uma requisição HTTP pronta. Separada do envio para dar para testar sem rede."""
-
-    url: str
-    json: dict[str, Any] | None = None
-    content: bytes | None = None
-    headers: dict[str, str] = field(default_factory=dict)
-
-
 def _highest(items: list[Finding]) -> Severity | None:
     return max((f.severity for f in items), key=lambda s: s.rank, default=None)
 
 
-def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> Delivery:
+def _alert(result: ScanResult, diff: ScanDiff, items: list[Finding]) -> dict[str, Any]:
+    """Texto, título, prioridade e o JSON completo de um alerta (para qualquer destino)."""
     top = _highest(items)
     priority = {Severity.CRITICAL: "urgent", Severity.HIGH: "high"}.get(top, "default") if top else "low"
-    generic = {
+    extra = {
         "scan_id": result.scan_id,
         "label": result.label,
         "score": result.score,
@@ -90,116 +84,26 @@ def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[
         "opened_ports": [port_label(p) for p in diff.alert_ports],
         "mac_changes": [{"ip": ip, "old": o, "new": n} for ip, o, n in diff.mac_changes],
     }
-    return text_delivery(target, build_message(result, diff, items),
-                         title=f"threeblindmice: {result.label} ({result.grade})", priority=priority, extra=generic)
+    return {"text": build_message(result, diff, items), "title": f"threeblindmice: {result.label} ({result.grade})",
+            "priority": priority, "extra": extra}
+
+
+def build_delivery(target: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> Delivery:
+    a = _alert(result, diff, items)
+    return text_delivery(target, a["text"], title=a["title"], priority=a["priority"], extra=a["extra"])
 
 
 def text_delivery(target: str, text: str, *, title: str = "threeblindmice", priority: str = "default",
                   extra: dict[str, Any] | None = None) -> Delivery:
-    """Uma mensagem de texto para qualquer destino suportado (alertas e o resumo semanal)."""
-    parsed = urlparse(target)
-    host = parsed.hostname or ""
-
-    if parsed.scheme == "tg":
-        # tg://<token>/<chat_id>: o token tem ':' e por isso vai inteiro no "netloc"
-        token, chat_id = parsed.netloc, parsed.path.strip("/")
-        # Mensagens específicas, mas sem nunca ecoar o token.
-        if not token:
-            raise ValueError("TBM_WEBHOOK do Telegram sem o token. Formato: tg://<token-do-bot>/<chat_id>. "
-                             "Use `tbm telegram-setup` para configurar.")
-        if ":" not in token:
-            raise ValueError("o token do Telegram parece incompleto (deveria ter ':'). "
-                             "Use `tbm telegram-setup` para configurar.")
-        if not chat_id:
-            raise ValueError("TBM_WEBHOOK do Telegram sem o chat_id no final (tg://<token>/<chat_id>). "
-                             "Use `tbm telegram-setup` para descobrir o chat_id.")
-        if not re.fullmatch(r"-?\d+|@\w+", chat_id):
-            raise ValueError("chat_id do Telegram inválido: deveria ser um número (ex.: 123456789 ou -100…). "
-                             "Use `tbm telegram-setup`.")
-        return Delivery(f"https://api.telegram.org/bot{token}/sendMessage",
-                        json={"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": True})
-
-    if parsed.scheme == "ntfy" or host == "ntfy.sh":
-        topic = (parsed.netloc + parsed.path).strip("/") if parsed.scheme == "ntfy" else parsed.path.strip("/")
-        base = "https://ntfy.sh" if parsed.scheme == "ntfy" else f"{parsed.scheme}://{parsed.netloc}"
-        return Delivery(f"{base}/{topic}", content=text.encode(), headers={
-            "Title": title,
-            "Priority": priority,
-            "Tags": "mouse,shield",
-        })
-
-    if parsed.scheme == "pushover":
-        # pushover://<app_token>@<user_key> — sem urlparse.hostname, que deixa minúsculo
-        token2, _, user2 = parsed.netloc.partition("@")
-        if not token2 or not user2:
-            raise ValueError("Pushover: use pushover://<app_token>@<user_key>.")
-        prio = {"urgent": "1", "high": "1"}.get(priority, "0")
-        return Delivery("https://api.pushover.net/1/messages.json",
-                        json={"token": token2, "user": user2, "message": text[:1024], "title": title, "priority": prio})
-
-    if parsed.scheme in ("hass", "homeassistant"):
-        # hass://<host>/<webhook_id>  (webhook do Home Assistant; use https:// no host real)
-        webhook = parsed.path.strip("/")
-        if not webhook or not host:
-            raise ValueError("Home Assistant: use hass://<host>/<webhook_id>.")
-        scheme = "https" if parsed.port in (None, 443, 8123) and parsed.port != 8123 else "http"
-        base = f"{scheme}://{host}" + (f":{parsed.port}" if parsed.port else "")
-        payload = {"title": title, "message": text, "priority": priority, **(extra or {})}
-        return Delivery(f"{base}/api/webhook/{webhook}", json=payload)
-
-    if host.endswith("discord.com") or host.endswith("discordapp.com"):
-        return Delivery(target, json={"content": text[:1990], "username": "threeblindmice"})
-    if host.endswith("slack.com"):
-        return Delivery(target, json={"text": text})
-    return Delivery(target, json={"text": text, **(extra or {})})
+    """A requisição HTTP de uma mensagem para o destino (alertas e o resumo semanal)."""
+    notifier, _ = notifier_for(target)
+    return notifier.delivery(target, text, title=title, priority=priority, extra=extra)
 
 
 async def send_text(target: str, text: str, *, title: str = "threeblindmice",
                     transport: httpx.AsyncBaseTransport | None = None) -> None:
-    if urlparse(target).scheme in ("smtp", "smtps", "mailto"):
-        await asyncio.to_thread(_send_email, target, title, text)
-        return
-    d = text_delivery(target, text, title=title)
-    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT}, transport=transport) as client:
-        resp = await client.post(d.url, json=d.json, content=d.content, headers=d.headers)
-        resp.raise_for_status()
-
-
-def _send_email(target: str, subject: str, body: str) -> None:
-    """E-mail por SMTP. Formato: smtp(s)://usuario:senha@servidor:porta/destinatario@exemplo.com
-
-    Fora do modelo HTTP das outras notificações: aqui a entrega é por smtplib,
-    numa thread (é bloqueante). A porta 465 usa SSL direto; 587/25 usam STARTTLS.
-    """
-    import smtplib
-    from email.message import EmailMessage
-    from urllib.parse import unquote
-
-    p = urlparse(target)
-    to_addr = unquote(p.path.strip("/"))
-    if not p.hostname or not to_addr:
-        raise ValueError("E-mail: use smtp://usuario:senha@servidor:porta/destino@exemplo.com")
-    user = unquote(p.username) if p.username else None
-    password = unquote(p.password) if p.password else None
-    port = p.port or (465 if p.scheme == "smtps" else 587)
-    msg = EmailMessage()
-    msg["From"] = user or f"threeblindmice@{p.hostname}"
-    msg["To"] = to_addr
-    msg["Subject"] = subject
-    msg.set_content(body)
-    if p.scheme == "smtps" or port == 465:
-        with smtplib.SMTP_SSL(p.hostname, port, timeout=20) as s:
-            if user and password:
-                s.login(user, password)
-            s.send_message(msg)
-    else:
-        with smtplib.SMTP(p.hostname, port, timeout=20) as s:
-            s.ehlo()
-            if port != 25:
-                s.starttls()
-            if user and password:
-                s.login(user, password)
-            s.send_message(msg)
+    notifier, _ = notifier_for(target)
+    await notifier.send(target, text, title=title, transport=transport)
 
 
 def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Finding]) -> dict:
@@ -208,7 +112,7 @@ def build_payload(url: str, result: ScanResult, diff: ScanDiff, items: list[Find
 
 
 async def send_test(url: str, transport: httpx.AsyncBaseTransport | None = None) -> int:
-    """Manda uma mensagem de teste para o destino. Devolve o status HTTP.
+    """Manda uma mensagem de teste para o destino. Devolve o status (HTTP, ou 250 no e-mail).
 
     Serve para validar a configuração (token, chat_id, tópico) sem esperar um
     scan encontrar algo novo.
@@ -217,11 +121,10 @@ async def send_test(url: str, transport: httpx.AsyncBaseTransport | None = None)
 
     result = ScanResult(label="teste", score=100, grade="A")
     diff = ScanDiff(previous_id=None, new_hosts=[Host(address="0.0.0.0", device_name="teste de conexão")])
-    d = build_delivery(url, result, diff, [])
-    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT},
-                                 transport=transport) as client:
-        resp = await client.post(d.url, json=d.json, content=d.content, headers=d.headers)
-    return resp.status_code
+    a = _alert(result, diff, [])
+    notifier, _ = notifier_for(url)
+    return await notifier.send(url, a["text"], title=a["title"], priority=a["priority"], extra=a["extra"],
+                               transport=transport, check=False)
 
 
 def in_quiet_hours(start: str, end: str, now: datetime | None = None) -> bool:
@@ -246,9 +149,8 @@ async def send_webhook(
     # Horário de silêncio: segura tudo que não for crítico (um crítico sempre passa).
     if quiet and in_quiet_hours(*quiet) and (_highest(items) or Severity.LOW).rank < Severity.CRITICAL.rank:
         return False
-    d = build_delivery(url, result, diff, items)
-    async with httpx.AsyncClient(timeout=15, headers={"User-Agent": USER_AGENT},
-                                 transport=transport) as client:
-        resp = await client.post(d.url, json=d.json, content=d.content, headers=d.headers)
-        resp.raise_for_status()
+    a = _alert(result, diff, items)
+    notifier, _ = notifier_for(url)
+    await notifier.send(url, a["text"], title=a["title"], priority=a["priority"], extra=a["extra"],
+                        transport=transport)
     return True

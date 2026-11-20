@@ -105,7 +105,7 @@ def gui(tmp_path, monkeypatch):
         sent.append(target)
         return 401 if "RUIM" in target else 200
 
-    monkeypatch.setattr("tbm.dashboard.gui.send_test", fake_send)
+    monkeypatch.setattr("tbm.dashboard.routes.alerts.send_test", fake_send)
     monkeypatch.setattr(config, "_setx", lambda v: True)
     monkeypatch.setattr(schedule, "status", lambda platform, label: {
         "installed": False, "supported": True, "next": None, "last": None, "result": None, "state": None})
@@ -130,8 +130,8 @@ def test_telegram_wizard(gui, monkeypatch):
     async def chats(token):
         return [SimpleNamespace(id=555, title="Eu", kind="private")]
 
-    monkeypatch.setattr("tbm.dashboard.gui.bot_username", bot)
-    monkeypatch.setattr("tbm.dashboard.gui.find_chats", chats)
+    monkeypatch.setattr("tbm.dashboard.routes.alerts.bot_username", bot)
+    monkeypatch.setattr("tbm.dashboard.routes.alerts.find_chats", chats)
     assert gui.post("/api/telegram/lookup", {"token": "curto"}).status_code == 400
     r = gui.post("/api/telegram/lookup", {"token": TOKEN}).json()
     assert r == {"bot": "vigia_bot", "chats": [{"id": 555, "title": "Eu", "kind": "private"}]}
