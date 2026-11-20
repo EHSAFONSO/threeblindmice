@@ -61,6 +61,9 @@ class Check(ABC):
     id: ClassVar[str]
     name: ClassVar[str]
     active_only: ClassVar[bool] = False
+    # Explicação para a página Funcionalidades (os nativos ficam em dashboard/features.py).
+    what: ClassVar[str] = ""
+    why: ClassVar[str] = ""
 
     def enabled(self, options: SnifferOptions) -> bool:
         if self.id in options.disabled or self.id.split(".")[0] in options.disabled:

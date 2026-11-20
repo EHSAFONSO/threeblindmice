@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from tbm import __version__
-from tbm.cli import alerts, history, scan, tools, ui, watch  # noqa: F401 (registram os comandos)
+from tbm.cli import alerts, history, plugins, scan, tools, ui, watch  # noqa: F401 (registram os comandos)
 from tbm.cli.common import (
     app,
     console,

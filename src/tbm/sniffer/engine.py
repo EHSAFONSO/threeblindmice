@@ -38,6 +38,9 @@ class Sniffer:
         self.p = progress or NullProgress()
 
     def checks(self) -> list[Check]:
+        from tbm.plugins import load_plugins
+
+        load_plugins()  # só os plugins autorizados em `tbm plugins enable`
         return [c for cls in REGISTRY.values() if (c := cls()).enabled(self.o)]
 
     async def run(self, scan: ScanResult) -> tuple[list[Finding], list[str]]:

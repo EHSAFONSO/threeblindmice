@@ -97,9 +97,15 @@ def checks() -> None:
     table.add_column("id")
     table.add_column("descrição")
     table.add_column("modo")
+    table.add_column("origem")
+    from tbm.plugins import ORIGINS, load_plugins
+
+    errors = load_plugins()
     for cid, cls in sorted(REGISTRY.items()):
         mode = "[yellow]ativo (--active)[/]" if cls.active_only else "passivo"
         if cid == "secrets.local":
             mode = "com --secrets"
-        table.add_row(cid, cls.name, mode)
+        table.add_row(cid, cls.name, mode, f"[magenta]plugin {ORIGINS[cid]}[/]" if cid in ORIGINS else "nativo")
     console.print(table)
+    for e in errors:
+        console.print(f"[red]plugin com erro (ficou de fora):[/] {e}")

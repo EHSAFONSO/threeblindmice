@@ -65,6 +65,9 @@ def register_notifier(cls: type[Notifier]) -> type[Notifier]:
 
 def notifier_for(target: str) -> tuple[Notifier, ParseResult]:
     """O destino que reconhece a URL; o webhook genérico é a última opção."""
+    from tbm.plugins import load_plugins
+
+    load_plugins()  # destinos de plugins autorizados
     p = urlparse(target)
     for n in NOTIFIERS:
         if n.matches(p):

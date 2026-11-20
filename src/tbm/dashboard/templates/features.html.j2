@@ -36,7 +36,7 @@
     <tbody>
     {% for c in checks %}
       <tr>
-        <td><b>{{ _(c.name) }}</b><br><span class="mode {{ c.mode.split()[0] }}">{{ _(c.mode) }}</span><br><code class="hint tech">{{ c.id }}</code></td>
+        <td><b>{{ _(c.name) }}</b><br><span class="mode {{ c.mode.split()[0] }}">{{ _(c.mode) }}</span><br><code class="hint tech">{{ c.id }}</code>{% if c.origin %}<br><span class="mode plugin">{{ _("plugin") }} · {{ c.origin }}</span>{% endif %}</td>
         <td>{{ _(c.what) }}</td>
         <td class="hint">{{ _(c.why) }}</td>
       </tr>

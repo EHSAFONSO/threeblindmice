@@ -199,6 +199,18 @@ Variáveis de ambiente: `NVD_API_KEY` (limite do NVD sobe de 5 para 50 req/30s),
 
 Falsos positivos de segredos: use um comentário `tbm:allow` na linha ou liste o caminho no `.tbmignore`.
 
+### Plugins
+
+Terceiros podem acrescentar **checks**, **destinos de alerta** e **enriquecedores de descoberta** em pacotes Python próprios, usando a API estável `tbm.plugin`. Um plugin roda código com acesso à sua rede, então **nada é carregado só por estar instalado**: cada pacote precisa ser autorizado.
+
+```bash
+tbm plugins list                         # instalados e autorizados
+tbm plugins enable tbm-plugin-exemplo    # mostra o que o pacote registra e pede confirmação
+tbm plugins disable tbm-plugin-exemplo
+```
+
+Os checks de plugins aparecem em `tbm checks` e na página Funcionalidades com a origem (pacote e versão). Um plugin com erro fica de fora e é anotado, sem derrubar o scan. `TBM_NO_PLUGINS=1` desliga todos. Para criar um, veja [`examples/tbm-plugin-exemplo`](examples/tbm-plugin-exemplo/src/tbm_plugin_exemplo/__init__.py).
+
 ## Arquitetura
 
 ```
@@ -207,7 +219,8 @@ src/tbm/
 ├── scope.py           # allowlist, expansão de alvos, enforce(), is_public()
 ├── pipeline.py        # Scout → Sniffer → aceitações → nota → histórico
 ├── schedule.py        # schtasks / systemd --user / cron
-├── cli.py             # Typer + Rich
+├── plugin.py          # API pública e estável para plugins; plugins.py carrega os autorizados
+├── cli/               # Typer + Rich: um módulo por área (scan, watch, history, alerts, ui, plugins, tools)
 ├── scout/
 │   ├── discovery.py   # ping do SO, gateway padrão, mDNS/SSDP multicast
 │   ├── classify.py    # tipo de dispositivo por pontuação de evidências
@@ -224,9 +237,10 @@ src/tbm/
 │   ├── diff.py        # por identidade de dispositivo, com migração de fingerprints antigos
 │   ├── acceptance.py  # riscos aceitos com prazo
 │   ├── letter.py      # carta para o provedor
-│   ├── notify.py      # Discord, Slack, Telegram, ntfy, webhook
-│   ├── scoring.py, store.py, sarif.py, redact.py, report.py
-└── dashboard/         # FastAPI + loader JS próprio (sem CDN), inventário de dispositivos
+│   ├── notifiers.py   # registro de destinos: Telegram, ntfy, Pushover, Home Assistant, e-mail, Discord, Slack, webhook
+│   ├── store.py       # SQLite (WAL) com migrações versionadas, índices por aparelho/achado e blobs comprimidos
+│   ├── notify.py, scoring.py, sarif.py, redact.py, report.py
+└── dashboard/         # FastAPI: routes/ (um router por área), templating.py, loader JS próprio (sem CDN)
 ```
 
 ### Decisões de design que valem estudar

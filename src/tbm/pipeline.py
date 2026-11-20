@@ -55,6 +55,7 @@ async def run_full_scan(
         scout = Scout(scout_options, progress)
         result.hosts = await scout.run(targets)
         result.gateway = scout.report.gateway
+        result.errors += scout.errors
     return await run_sniffer(result, sniffer_options, progress)
 
 

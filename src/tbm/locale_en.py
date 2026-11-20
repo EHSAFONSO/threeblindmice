@@ -515,6 +515,7 @@ EN: dict[str, str] = {
     'O que verifica': 'What it checks',
     'Por que importa': 'Why it matters',
     'passivo': 'passive',
+    'plugin': 'plugin',
     'ativo': 'active',
     'com --secrets': 'with --secrets',
     'Achados e riscos aceitos': 'Findings and accepted risks',

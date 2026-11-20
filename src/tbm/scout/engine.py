@@ -66,6 +66,7 @@ class Scout:
         self.p = progress or NullProgress()
         self.limiter = RateLimiter(int(options.rate), 1.0) if options.rate else None
         self.report = DiscoveryReport()
+        self.errors: list[str] = []  # falhas de enriquecedores (vão para ScanResult.errors)
 
     async def run(self, targets: list[Target]) -> list[Host]:
         sem = asyncio.Semaphore(self.o.concurrency)
@@ -86,10 +87,29 @@ class Scout:
             await enrich_model(found)  # fabricante/modelo/firmware anunciados (UPnP, SNMP)
         if self.o.ipv6 and found:
             await self._attach_ipv6(found)
+        if found:
+            await self._run_enrichers(found)
         for h in found:  # segunda passada: agora com tipo e portas
             report_found(self.p, h.address, name=h.name, type=h.device_type,
                          ports=len(h.services), gateway=h.address == self.report.gateway)
         return sorted(found, key=lambda h: ipaddress.ip_address(h.address))
+
+    async def _run_enrichers(self, hosts: list[Host]) -> None:
+        """Enriquecedores de plugins (tbm.discovery): cada um isolado, com erro anotado no scan."""
+        from tbm.plugins import load_plugins
+        from tbm.scout.extend import ENRICHERS
+
+        load_plugins()
+        for eid, cls in ENRICHERS.items():
+            before = list(hosts)
+            try:
+                await cls().enrich(hosts, self.o)
+            except Exception as exc:  # noqa: BLE001 (um plugin quebrado não derruba o scan)
+                self.errors.append(f"{eid}: {exc.__class__.__name__}: {exc}")
+            if [h.address for h in hosts] != [h.address for h in before]:
+                # aparelhos são decididos pelo escopo, não por plugin: desfaz qualquer inclusão/remoção
+                self.errors.append(f"{eid}: alterou a lista de aparelhos (ignorado)")
+                hosts[:] = before
 
     # ───────────────────────── descoberta ─────────────────────────
 

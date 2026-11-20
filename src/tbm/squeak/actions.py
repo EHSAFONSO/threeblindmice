@@ -11,7 +11,7 @@ risco real.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
@@ -120,7 +120,14 @@ def classify(f: Finding) -> str | None:
         return "mqtt"
     if cid == "network.default-pass":
         return "password"
+    for extra in CLASSIFIERS:  # tipos de correção registrados por plugins (tbm.plugin)
+        if (kind := extra(f)) in KINDS:
+            return kind
     return None
+
+
+# Classificadores extras (plugins): recebem o achado e devolvem a chave de um KINDS, ou None.
+CLASSIFIERS: list[Callable[[Finding], str | None]] = []
 
 
 @dataclass

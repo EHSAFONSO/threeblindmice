@@ -131,9 +131,13 @@ TOOLS: list[Feature] = [
 
 
 def catalog() -> list[dict[str, str]]:
+    from tbm.plugins import ORIGINS, load_plugins
+
+    load_plugins()
     rows = []
     for cid, cls in sorted(REGISTRY.items()):
-        info = CHECKS.get(cid, CheckInfo(cls.name, ""))
+        info = CHECKS.get(cid, CheckInfo(cls.what or cls.name, cls.why))
         mode = "ativo" if cls.active_only else ("com --secrets" if cid == "secrets.local" else "passivo")
-        rows.append({"id": cid, "name": cls.name, "mode": mode, "what": info.what, "why": info.why})
+        rows.append({"id": cid, "name": cls.name, "mode": mode, "what": info.what, "why": info.why,
+                     "origin": ORIGINS.get(cid, "")})
     return rows
