@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "threeblindmice"
-version = "0.8.0"
+version = "0.9.0"
 description = "Toolkit defensivo de avaliação de segurança: Scout (recon), Sniffer (análise) e Squeak (relatórios)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -91,3 +91,4 @@ ignore = ["ASYNC109", "UP042"]
 "src/tbm/cli.py" = ["E501"]  # declarações de opções do Typer ficam mais legíveis numa linha
 "src/tbm/squeak/guides.py" = ["E501"]  # tabela de menus por marca: uma linha por caminho
 "src/tbm/locale_en.py" = ["E501"]  # catálogo de traduções: uma frase por linha
+"src/tbm/desktop/app.py" = ["E501"]  # HTML/CSS da tela de abertura embutido
