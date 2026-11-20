@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import time
 from dataclasses import dataclass, field
 from functools import partial
+from pathlib import Path
 
-from tbm.asyncutil import RateLimiter, gather_limited
+from tbm.asyncutil import AdaptiveSemaphore, RateLimiter, gather_limited
 from tbm.models import Host, Service
 from tbm.progress import NullProgress, ProgressHook, report_found
 from tbm.scope import Target
@@ -19,13 +21,18 @@ from tbm.scout.ipv6 import is_global_v6, local_global_addresses, open_on_v6, rea
 from tbm.scout.model import enrich as enrich_model
 from tbm.scout.names import local_name
 from tbm.scout.ports import SERVICE_NAMES
-from tbm.scout.portscan import is_alive, reverse_dns, scan_ports
+from tbm.scout.portscan import DISCOVERY_PORTS, FAST_DISCOVERY_PORTS, is_alive, reverse_dns, scan_ports
 from tbm.scout.udp import UDP_PROBES, probe_udp
 
 PHASE_DISCOVERY = "Scout · descoberta de hosts"
 PHASE_PORTS = "Scout · varredura de portas"
 PHASE_SERVICES = "Scout · identificação de serviços"
 PHASE_UDP = "Scout · sondas UDP"
+
+# Acima disto (/22), a descoberta "auto" vira a rápida: sem um ping do sistema por IP.
+LARGE_NETWORK = 1024
+# Teto de pings na descoberta rápida (um processo do sistema cada): ~1 min com 64 em paralelo.
+MAX_FAST_PINGS = 4096
 
 
 @dataclass
@@ -46,6 +53,11 @@ class ScoutOptions:
     rate: float | None = None  # conexões TCP por segundo (None = sem limite)
     local_names: bool = True  # NetBIOS/LLMNR quando o DNS reverso não tem nome
     ipv6: bool = True  # endereços IPv6 globais e portas abertas também no IPv6
+    # auto: "thorough" até /22 e "fast" acima. fast = TCP em 4 portas + ARP + multicast, e ping
+    # só nos blocos /24 em que algo respondeu; o timeout passa a seguir o RTT medido.
+    discovery_mode: str = "auto"
+    checkpoint: Path | None = None  # arquivo de checkpoint (redes grandes); None = sem checkpoint
+    resume: bool = False  # reaproveita o checkpoint, se os alvos e as portas forem os mesmos
 
     @classmethod
     def gentle(cls, ports: list[int], **kw) -> ScoutOptions:
@@ -67,19 +79,67 @@ class Scout:
         self.limiter = RateLimiter(int(options.rate), 1.0) if options.rate else None
         self.report = DiscoveryReport()
         self.errors: list[str] = []  # falhas de enriquecedores (vão para ScanResult.errors)
+        self.timeout = options.timeout  # timeout de conexão efetivo (pode cair com o RTT medido)
+        self.mode = "thorough"
+        self.timings: dict[str, float] = {}  # segundos por fase (vão para ScanResult.timings)
+        self.semaphore: AdaptiveSemaphore | None = None
 
     async def run(self, targets: list[Target]) -> list[Host]:
-        sem = asyncio.Semaphore(self.o.concurrency)
-        alive = await self._discover(targets, sem) if self.o.discovery else targets
+        sem = self.semaphore = AdaptiveSemaphore(self.o.concurrency)
+        try:
+            return await self._run(targets, sem)
+        finally:
+            sem.close()
+            if sem.shrinks:
+                self.p.log(f"paralelismo reduzido para {sem.limit} sockets (o sistema estava recusando conexões)")
 
-        self.p.start(PHASE_PORTS, len(alive) * len(self.o.ports))
+    async def _run(self, targets: list[Target], sem: AdaptiveSemaphore) -> list[Host]:
+        from tbm.scout.checkpoint import Checkpoint, fingerprint
+
+        by_ip = {t.address: t for t in targets}
+        ck = None
+        resumed = False
+        if self.o.checkpoint is not None:
+            key = fingerprint(list(by_ip), self.o.ports, self.o.udp)
+            ck, resumed = Checkpoint.open(self.o.checkpoint, key, resume=self.o.resume)
+
+        start = time.monotonic()
+        if resumed and ck is not None and ck.discovery is not None:
+            disc = ck.discovery
+            self.report = DiscoveryReport(found_by={ip: set(m) for ip, m in disc["found_by"].items()},
+                                          announcements=ck.announcements(), gateway=disc["gateway"])
+            self.timeout = disc["timeout"]
+            alive = [by_ip[ip] for ip in disc["alive"] if ip in by_ip]
+            self.p.log(f"retomando o scan anterior: {len(ck.scanned)}/{len(alive)} aparelhos já varridos")
+        else:
+            resumed = False
+            alive = await self._discover(targets, sem) if self.o.discovery else targets
+            if ck is not None:
+                ck.save_discovery([t.address for t in alive], self.report.found_by, self.report.gateway,
+                                  self.report.announcements, self.timeout)
+        self.timings["discovery"] = round(time.monotonic() - start, 2)
+
+        start = time.monotonic()
+        previous = ck.hosts() if resumed and ck is not None else []
+        done = ck.scanned if resumed and ck is not None else set()
+        pending = [t for t in alive if t.address not in done]
+        self.p.start(PHASE_PORTS, len(pending) * len(self.o.ports))
         self.p.start(PHASE_SERVICES, 0)
         if self.o.udp:
-            self.p.start(PHASE_UDP, len(alive) * len(self.o.udp_ports))
-        hosts = await gather_limited(
-            (partial(self._scan_host, t, sem) for t in alive), self.o.host_parallelism
-        )
-        found = [h for h in hosts if h is not None]
+            self.p.start(PHASE_UDP, len(pending) * len(self.o.udp_ports))
+        found = list(previous)
+        # Com checkpoint, um bloco /24 por vez (o arquivo é gravado a cada bloco); sem, tudo junto.
+        for chunk in (self._blocks(pending) if ck is not None else [pending]):
+            hosts = await gather_limited(
+                (partial(self._scan_host, t, sem) for t in chunk), self.o.host_parallelism
+            )
+            new = [h for h in hosts if h is not None]
+            found += new
+            if ck is not None:
+                ck.add([t.address for t in chunk], new)
+        self.timings["ports"] = round(time.monotonic() - start, 2)
+
+        start = time.monotonic()
         if self.o.mac_lookup and found:
             await self._attach_macs(found)
         self._identify(found)
@@ -92,7 +152,19 @@ class Scout:
         for h in found:  # segunda passada: agora com tipo e portas
             report_found(self.p, h.address, name=h.name, type=h.device_type,
                          ports=len(h.services), gateway=h.address == self.report.gateway)
+        self.timings["identify"] = round(time.monotonic() - start, 2)
+        if ck is not None:
+            ck.finish()  # terminou: não há o que retomar
         return sorted(found, key=lambda h: ipaddress.ip_address(h.address))
+
+    @staticmethod
+    def _blocks(targets: list[Target]) -> list[list[Target]]:
+        """Agrupa por bloco /24 (IPv4) na ordem em que vieram."""
+        groups: dict[str, list[Target]] = {}
+        for t in targets:
+            key = t.address.rsplit(".", 1)[0] if t.address.count(".") == 3 else t.address
+            groups.setdefault(key, []).append(t)
+        return list(groups.values())
 
     async def _run_enrichers(self, hosts: list[Host]) -> None:
         """Enriquecedores de plugins (tbm.discovery): cada um isolado, com erro anotado no scan."""
@@ -118,11 +190,18 @@ class Scout:
         if len(targets) == 1:
             return targets
         by_ip = {t.address: t for t in targets}
+        fast = self.o.discovery_mode == "fast" or (self.o.discovery_mode == "auto" and len(targets) > LARGE_NETWORK)
+        self.mode = "fast" if fast else "thorough"
         self.p.start(PHASE_DISCOVERY, len(targets))
+        rtts: list[float] = []
+        probe_ports = FAST_DISCOVERY_PORTS if fast else DISCOVERY_PORTS
 
         async def tcp_check(t: Target) -> str | None:
-            ok = await is_alive(t.address, self.o.timeout, sem, self.limiter)
+            began = time.monotonic()
+            ok = await is_alive(t.address, self.o.timeout, sem, self.limiter, ports=probe_ports)
             self.p.advance(PHASE_DISCOVERY)
+            if ok:
+                rtts.append(time.monotonic() - began)
             return t.address if ok else None
 
         async def no_ping() -> set[str]:
@@ -131,14 +210,45 @@ class Scout:
         async def no_multicast() -> dict[str, Announcement]:
             return {}
 
+        # Rede grande: um processo de ping por IP (65 mil numa /16) custa mais que o resto do scan.
+        # O ping fica para depois, só nos blocos /24 em que algo já respondeu.
         tcp_results, pinged, announced, gateway = await asyncio.gather(
-            gather_limited((partial(tcp_check, t) for t in targets), limit=128),
-            ping_sweep(list(by_ip), self.o.timeout) if self.o.ping else no_ping(),
+            gather_limited((partial(tcp_check, t) for t in targets), limit=512 if fast else 128),
+            ping_sweep(list(by_ip), self.o.timeout) if self.o.ping and not fast else no_ping(),
             multicast_discover() if self.o.multicast else no_multicast(),
             default_gateway(),
         )
         # A tabela ARP é lida depois: as sondas acima é que a preenchem.
         arp = await read_arp_table() if self.o.mac_lookup else {}
+        if fast:
+            from collections import Counter
+
+            from tbm.scout.discovery import local_networks
+
+            hits = {ip for ip in tcp_results if ip} | set(arp) | set(announced)
+            per_block = Counter(ip.rsplit(".", 1)[0] for ip in hits if ip in by_ip)
+            blocks = set(per_block)
+            # Na rede local, a própria tentativa de conexão já fez o sistema resolver o ARP de quem
+            # está vivo (mesmo com tudo filtrado): o ping só acrescenta algo em blocos roteados.
+            local = {n.rsplit(".", 1)[0] for n in local_networks()} if self.o.mac_lookup else set()
+            ranked = sorted(blocks - local, key=lambda b: -per_block[b])
+            by_block: dict[str, list[str]] = {}
+            for ip in by_ip:
+                by_block.setdefault(ip.rsplit(".", 1)[0], []).append(ip)
+            candidates = [ip for b in ranked for ip in by_block[b] if ip not in hits]
+            if len(candidates) > MAX_FAST_PINGS:
+                self.p.log(f"ping limitado aos {MAX_FAST_PINGS} endereços dos blocos com mais respostas "
+                           f"(de {len(candidates)}); o resto fica com TCP, ARP e multicast")
+                candidates = candidates[:MAX_FAST_PINGS]
+            if self.o.ping and candidates:
+                pinged = await ping_sweep(candidates, self.o.timeout)
+                if self.o.mac_lookup:
+                    arp = {**arp, **await read_arp_table()}
+            if len(rtts) >= 8:  # timeout de conexão pelo RTT medido (nunca acima do pedido)
+                p90 = sorted(rtts)[int(len(rtts) * 0.9) - 1]
+                self.timeout = max(0.3, min(self.o.timeout, round(4 * p90, 2)))
+            self.p.log(f"rede grande ({len(targets)} endereços): descoberta rápida, ping em "
+                       f"{len(blocks)} bloco(s) /24 com resposta, timeout {self.timeout:.2f}s")
 
         methods: dict[str, set[str]] = {}
 
@@ -242,7 +352,7 @@ class Scout:
         tcp_task = scan_ports(
             target.address,
             self.o.ports,
-            timeout=self.o.timeout,
+            timeout=self.timeout,
             sem=sem,
             on_done=lambda: self.p.advance(PHASE_PORTS),
             limiter=self.limiter,

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 
 from tbm.models import ScanResult, utcnow
 from tbm.progress import ProgressHook
 from tbm.scope import Scope, Target
 from tbm.scout import Scout, ScoutOptions
+from tbm.scout.engine import LARGE_NETWORK
 from tbm.sniffer import Sniffer, SnifferOptions
 from tbm.squeak import HistoryStore, ScanDiff, diff_scans, redact
 from tbm.squeak.acceptance import apply_acceptances
@@ -28,7 +30,9 @@ def finalize(result: ScanResult) -> ScanResult:
 async def run_sniffer(
     result: ScanResult, options: SnifferOptions, progress: ProgressHook | None = None
 ) -> ScanResult:
+    start = time.monotonic()
     findings, errors = await Sniffer(options, progress).run(result)
+    result.timings["checks"] = round(time.monotonic() - start, 2)
     result.findings = findings
     result.errors += errors
     return finalize(result)
@@ -56,6 +60,7 @@ async def run_full_scan(
         result.hosts = await scout.run(targets)
         result.gateway = scout.report.gateway
         result.errors += scout.errors
+        result.timings.update(scout.timings)
     return await run_sniffer(result, sniffer_options, progress)
 
 
@@ -78,9 +83,15 @@ async def execute(job: ScanJob, store: HistoryStore, progress: ProgressHook | No
     # e o novo IP também precisa passar pelo escopo.
     targets = job.scope.resolve(job.specs)
     job.sniffer_options.scope = job.scope
+    scout_options = job.scout_options
+    if scout_options.checkpoint is None and (scout_options.resume or len(targets) > LARGE_NETWORK):
+        # rede grande: grava o progresso por bloco /24 (`tbm scan --resume` continua daqui)
+        from tbm.scout.checkpoint import checkpoint_path
+
+        scout_options = replace(scout_options, checkpoint=checkpoint_path(job.label))
     result = await run_full_scan(
         targets=targets, specs=job.specs, scope_source=job.scope.source, label=job.label,
-        scout_options=job.scout_options, sniffer_options=job.sniffer_options, progress=progress,
+        scout_options=scout_options, sniffer_options=job.sniffer_options, progress=progress,
     )
     store._hydrate(result)  # nomes e aprovações do cadastro de aparelhos
     if apply_acceptances(result, store.acceptances()):

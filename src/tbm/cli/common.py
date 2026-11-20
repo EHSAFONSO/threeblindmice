@@ -139,13 +139,16 @@ def _sniffer_options(active: bool, no_cve: bool, secrets: Path | None, disable: 
 def _scout_options(ports: str, timeout: float, concurrency: int, no_discovery: bool,
                    udp: bool = False, no_mac: bool = False, gentle: bool = False,
                    rate: float | None = None, no_ping: bool = False,
-                   no_multicast: bool = False) -> ScoutOptions:
+                   no_multicast: bool = False, discovery: str = "auto", resume: bool = False) -> ScoutOptions:
     try:
         port_list = parse_ports(ports)
     except ValueError as exc:
         raise _fail(str(exc)) from exc
+    if discovery not in ("auto", "thorough", "fast"):
+        raise _fail("--discovery aceita auto, thorough ou fast")
     common: dict[str, Any] = dict(timeout=timeout, discovery=not no_discovery, udp=udp,
-                                  mac_lookup=not no_mac, ping=not no_ping, multicast=not no_multicast)
+                                  mac_lookup=not no_mac, ping=not no_ping, multicast=not no_multicast,
+                                  discovery_mode=discovery, resume=resume)
     if gentle:
         opts = ScoutOptions.gentle(port_list, **common)
     else:
@@ -246,6 +249,9 @@ def print_summary(result: ScanResult, diff: ScanDiff | None = None) -> None:
         lines.append(f"[dim]{accepted} risco(s) aceito(s) fora da nota (tbm accepted)[/]")
     if result.errors:
         lines.append(f"[yellow]{len(result.errors)} erro(s) em checks; veja o relatório.[/]")
+    if result.timings:
+        names = {"discovery": "descoberta", "ports": "portas", "identify": "identificação", "checks": "checks"}
+        lines.append("[dim]Tempo: " + " · ".join(f"{names.get(k, k)} {v:.1f}s" for k, v in result.timings.items()) + "[/]")
     console.print(Panel("\n".join(lines), title=f"Squeak · {result.label}", expand=False))
 
 
@@ -301,4 +307,6 @@ NoMcastOpt = Annotated[bool, typer.Option("--no-multicast", help="Descoberta sem
 MinSevOpt = Annotated[Severity, typer.Option(help="Severidade mínima para alertar.")]
 NoEvidenceOpt = Annotated[bool, typer.Option("--no-evidence", help="Não grava banners e trechos de evidência (histórico e relatório).")]
 VerboseOpt = Annotated[bool, typer.Option("--verbose", "-v")]
+DiscoveryOpt = Annotated[str, typer.Option("--discovery", help="auto | thorough | fast. auto: completa até /22, rápida acima (sem um ping por IP).")]
+ResumeOpt = Annotated[bool, typer.Option("--resume", help="Continua um scan de rede grande interrompido (mesmos alvos e portas).")]
 

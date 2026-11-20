@@ -15,6 +15,7 @@ from tbm.cli.common import (
     ActiveOpt,
     ConcOpt,
     DisableOpt,
+    DiscoveryOpt,
     ExternalOpt,
     GentleOpt,
     LabelOpt,
@@ -31,6 +32,7 @@ from tbm.cli.common import (
     NotifyOpt,
     PortsOpt,
     RateOpt,
+    ResumeOpt,
     RichProgress,
     ScopeOpt,
     SecretsOpt,
@@ -92,6 +94,8 @@ def scan(
     rate: RateOpt = None,
     no_ping: NoPingOpt = False,
     no_multicast: NoMcastOpt = False,
+    discovery: DiscoveryOpt = "auto",
+    resume: ResumeOpt = False,
     verbose: VerboseOpt = False,
 ) -> None:
     """[bold]Os três juntos:[/] Scout → Sniffer → Squeak (nota, diff, relatório, alerta)."""
@@ -100,7 +104,7 @@ def scan(
     job = ScanJob(
         specs=targets, scope=sc, label=label, save=not no_save, no_evidence=no_evidence,
         scout_options=_scout_options(ports, timeout, concurrency, no_discovery, udp, no_mac,
-                                     gentle, rate, no_ping, no_multicast),
+                                     gentle, rate, no_ping, no_multicast, discovery, resume),
         sniffer_options=_sniffer_options(active, no_cve, secrets, disable, max_cves, sc, no_epss, no_backport,
                                          external),
     )

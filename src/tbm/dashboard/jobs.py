@@ -73,7 +73,7 @@ class ScanParams(BaseModel):
 class Job:
     id: str
     params: ScanParams
-    status: str = "queued"  # queued | running | done | error
+    status: str = "queued"  # queued | running | done | error | cancelled
     phases: dict[str, list[int]] = field(default_factory=dict)  # fase → [feito, total]
     log: list[str] = field(default_factory=list)
     devices: dict[str, dict[str, Any]] = field(default_factory=dict)  # aparecem ao vivo na tela
@@ -89,7 +89,23 @@ class Job:
             "log": self.log[-20:], "summary": self.summary, "error": self.error,
             "devices": [{**d, "icon": device_icon(d.get("type"))} for d in self.devices.values()],
             "elapsed": round(((self.finished or utcnow()) - self.started).total_seconds(), 1),
+            "eta": self.eta(),
         }
+
+    def eta(self) -> int | None:
+        """Segundos que faltam, pelo ritmo até aqui (None enquanto não dá para estimar).
+
+        Aproximado: as fases somam itens de custos diferentes e o total cresce quando
+        aparecem serviços para identificar. Serve para "uns 3 minutos", não para cronômetro.
+        """
+        if self.status != "running":
+            return None
+        done = sum(d for d, _ in self.phases.values())
+        total = sum(t for _, t in self.phases.values())
+        elapsed = (utcnow() - self.started).total_seconds()
+        if total <= 0 or done < max(1, total * 0.05) or elapsed < 3:
+            return None
+        return max(0, round(elapsed * (total - done) / done))
 
 
 class JobProgress:
@@ -177,6 +193,29 @@ class JobRunner:
         self.jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._current: str | None = None
+        self._tasks: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Task[tuple[ScanResult, ScanDiff]]]] = {}
+
+    def cancel(self, job_id: str) -> bool:
+        """Pede o cancelamento do scan em andamento (de qualquer thread). False se não há o que cancelar."""
+        job = self.jobs.get(job_id)
+        entry = self._tasks.get(job_id)
+        if job is None or entry is None or job.status not in ("queued", "running"):
+            return False
+        loop, task = entry
+        job.log.append("cancelando…")
+        loop.call_soon_threadsafe(task.cancel)
+        return True
+
+    def _execute(self, loop: asyncio.AbstractEventLoop, job: Job, spec: ScanJob) -> tuple[ScanResult, ScanDiff]:
+        async def main() -> tuple[ScanResult, ScanDiff]:
+            return await self.executor(spec, self.store, JobProgress(job))
+
+        task: asyncio.Task[tuple[ScanResult, ScanDiff]] = loop.create_task(main())
+        self._tasks[job.id] = (loop, task)
+        try:
+            return loop.run_until_complete(task)
+        finally:
+            self._tasks.pop(job.id, None)
 
     @property
     def current(self) -> Job | None:
@@ -217,7 +256,7 @@ class JobRunner:
         job.status = "running"
         try:
             before = self.store.latest(label)
-            partial, _ = loop.run_until_complete(self.executor(spec, self.store, JobProgress(job)))
+            partial, _ = self._execute(loop, job, spec)
             if before is None:
                 raise RuntimeError("não há scan anterior para comparar")
             merged = merge_host(before, partial, address)
@@ -235,6 +274,8 @@ class JobRunner:
                                  label=label, link=f"/findings/{label}")
             job.summary = {**summarize(merged, diff_scans(before, merged), None, None), "verify": verify}
             job.status = "done"
+        except asyncio.CancelledError:
+            job.status, job.error = "cancelled", "scan cancelado"
         except Exception as exc:  # noqa: BLE001
             job.status, job.error = "error", f"{exc.__class__.__name__}: {exc}"
         finally:
@@ -251,7 +292,7 @@ class JobRunner:
             loop = asyncio.new_event_loop()
         job.status = "running"
         try:
-            result, diff = loop.run_until_complete(self.executor(spec, self.store, JobProgress(job)))
+            result, diff = self._execute(loop, job, spec)
             report = tbm_home() / "reports" / f"tbm-{result.label}-{result.started_at:%Y%m%d-%H%M%S}.html"
             write_report(result, report, diff)
             alerted = None
@@ -271,6 +312,8 @@ class JobRunner:
             job.status = "done"
         except ScopeError as exc:
             job.status, job.error = "error", str(exc)
+        except asyncio.CancelledError:
+            job.status, job.error = "cancelled", "scan cancelado"
         except Exception as exc:  # noqa: BLE001
             job.status, job.error = "error", f"{exc.__class__.__name__}: {exc}"
         finally:

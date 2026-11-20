@@ -80,6 +80,12 @@ def build(ctx: Ctx) -> APIRouter:
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse({"job": job.id}, status_code=202)
 
+    @r.post("/api/jobs/{job_id}/cancel")
+    def cancel_job(job_id: str) -> JSONResponse:
+        if not runner.cancel(job_id):
+            return JSONResponse({"error": "nenhum scan em andamento com esse id"}, status_code=404)
+        return JSONResponse({"ok": True})
+
     @r.get("/api/jobs/{job_id}")
     def job_status(job_id: str) -> JSONResponse:
         job = runner.jobs.get(job_id)

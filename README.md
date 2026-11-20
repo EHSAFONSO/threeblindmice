@@ -193,7 +193,10 @@ tbm secrets . -o segredos.sarif      # credenciais vazadas → anotações nos P
 tbm history / tbm diff <a> <b> / tbm report <scan_id> -o r.html
 tbm history prune --dry-run          # limpa scans antigos: tudo de 30 dias, 1/semana até 1 ano, 1/mês depois
 tbm checks                           # lista os checks
+tbm scan 10.0.0.0/16 --resume        # rede grande: continua um scan interrompido (checkpoint por bloco /24)
 ```
+
+Em redes acima de /22, a descoberta fica rápida sozinha (`--discovery auto`). O TCP passa a testar 4 portas em vez de 12, sem um ping do sistema por IP. Depois, o ping vai só para os blocos /24 roteados em que algo respondeu, com um teto de 4.096 endereços. O timeout segue o RTT medido. O paralelismo cai pela metade se o sistema começar a recusar sockets. Na interface, o scan em andamento mostra o tempo restante e tem um botão **Cancelar**. O relatório mostra o tempo gasto em cada fase.
 
 Variáveis de ambiente: `NVD_API_KEY` (limite do NVD sobe de 5 para 50 req/30s), `TBM_WEBHOOK`, `TBM_HOME` (padrão `~/.threeblindmice`).
 

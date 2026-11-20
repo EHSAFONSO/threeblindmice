@@ -99,6 +99,9 @@
         {{ r.started_at.astimezone().strftime("%d/%m/%Y %H:%M") }}
         {% if r.finished_at %} · duração {{ ((r.finished_at - r.started_at).total_seconds()) | round(1) }}s{% endif %}
       </div>
+      {% if r.timings %}{% set names = {"discovery": "descoberta", "ports": "portas e serviços", "identify": "identificação", "checks": "checks"} %}
+      <div class="meta">Tempo por fase: {% for k, v in r.timings.items() %}{{ names.get(k, k) }} {{ v | round(1) }}s{% if not loop.last %} · {% endif %}{% endfor %}</div>
+      {% endif %}
       <div class="meta">Alvos: {{ r.targets | join(", ") }}</div>
       <div class="meta">Escopo: {{ r.scope }}</div>
     </div>

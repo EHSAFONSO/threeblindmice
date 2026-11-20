@@ -63,6 +63,10 @@
         <h2 id="progress-title" style="margin:0 0 4px">{{ _("Procurando aparelhos…") }}</h2>
         <div class="hint" id="progress-detail"></div>
         <div class="progress" style="margin-top:12px" aria-hidden="true"><div id="bar" style="width:0"></div></div>
+        <div class="row" style="margin-top:10px;align-items:center;gap:12px">
+          <span class="hint" id="progress-eta" aria-live="polite"></span>
+          <button type="button" class="btn ghost" id="cancel-scan">{{ _("Cancelar") }}</button>
+        </div>
       </div>
     </div>
     <h3 style="margin:18px 0 10px">{{ _("Encontrados") }} <span class="hint" id="found-count"></span></h3>
@@ -82,7 +86,8 @@ const T = {{ {
   "devices": _("{n} dispositivo(s)"), "accepted": _("{n} aceito(s)"),
   "since": _("Desde o scan anterior: {a} novo(s), {b} resolvido(s)"), "unseen": _("aparelho(s) inédito(s):"),
   "alerted": _("alerta enviado"), "first": _("Primeiro scan deste histórico: os próximos serão comparados com este."),
-  "failed": _("O scan falhou"),
+  "failed": _("O scan falhou"), "cancelled": _("Scan cancelado"),
+  "eta_min": _("cerca de {n} min restantes"), "eta_soon": _("menos de 1 min restante"),
   "sev": {"critical": _("crítico"), "high": _("alto"), "medium": _("médio"), "low": _("baixo")},
 } | tojson }};
 const fmt = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => v[k]);
@@ -132,6 +137,7 @@ function render(job) {
   $("progress-title").textContent = LABEL[step];
   $("bar").style.width = (total ? Math.round(100 * done / total) : 3) + "%";
   $("progress-detail").textContent = job.log.length ? job.log[job.log.length - 1] : `${job.elapsed}s`;
+  $("progress-eta").textContent = job.eta == null ? "" : (job.eta < 60 ? T.eta_soon : fmt(T.eta_min, {n: Math.round(job.eta / 60)}));
   (job.devices || []).forEach(deviceChip);
   $("found-count").textContent = shown.size ? `(${shown.size})` : "";
 }
@@ -173,10 +179,23 @@ function done(job) {
 async function watch(jobId) {
   $("form-section").hidden = true;
   $("progress-section").hidden = false;
+  $("cancel-scan").style.display = ""; $("cancel-scan").disabled = false;  // vale para um novo scan
+  $("cancel-scan").onclick = async () => {
+    $("cancel-scan").disabled = true;
+    try { await tbmPost("/api/jobs/" + jobId + "/cancel", {}); } catch (err) { tbmToast(err.message, "error"); $("cancel-scan").disabled = false; }
+  };
   while (true) {
     const job = await (await fetch("/api/jobs/" + jobId)).json();
     render(job);
+    if (job.status !== "running" && job.status !== "queued") { $("cancel-scan").style.display = "none"; $("progress-eta").textContent = ""; }
     if (job.status === "done") { done(job); return; }
+    if (job.status === "cancelled") {
+      $("radar").classList.add("stopped");
+      $("progress-title").textContent = T.cancelled;
+      $("progress-detail").textContent = "";
+      $("form-section").hidden = false; $("start").disabled = false;
+      return;
+    }
     if (job.status === "error") {
       $("radar").classList.add("stopped");
       $("progress-title").textContent = T.failed;

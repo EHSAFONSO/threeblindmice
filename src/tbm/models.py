@@ -198,6 +198,8 @@ class ScanResult(BaseModel):
     hosts: list[Host] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    # segundos por fase: discovery, ports, identify, checks (redes grandes: onde foi o tempo)
+    timings: dict[str, float] = Field(default_factory=dict)
     score: int | None = None
     grade: str | None = None
 

@@ -56,6 +56,10 @@ def fake_executor(job, store, progress):
     """Faz o papel do Scout+Sniffer: anuncia aparelhos e devolve um resultado pronto."""
 
     async def run():
+        if "192.168.0.99" in job.specs:  # o "scan demorado" do teste de cancelamento
+            progress.start("Scout · descoberta de hosts", 100)
+            progress.advance("Scout · descoberta de hosts", 10)
+            await asyncio.sleep(60)
         progress.start("Scout · descoberta de hosts", 2)
         for h in (GW, TV):
             report_found(progress, h.address, name=h.device_name, gateway=h is GW, type=h.device_type)
@@ -192,6 +196,18 @@ def test_live_scan_shows_devices_as_they_appear(page, server):
     expect(page.locator("#progress-section")).to_be_visible()
     expect(page.get_by_text("192.168.0.50").first).to_be_visible(timeout=10_000)
     expect(page.get_by_text("Scan concluído")).to_be_visible(timeout=15_000)
+
+
+def test_cancel_running_scan(page, server):
+    page.goto(server[1] + "/scan")
+    page.locator("#targets").fill("192.168.0.99")
+    page.get_by_role("button", name="Iniciar scan").click()
+    cancel = page.get_by_role("button", name="Cancelar")
+    expect(cancel).to_be_visible()
+    cancel.click()
+    expect(page.get_by_text("Scan cancelado")).to_be_visible(timeout=5_000)
+    expect(cancel).to_be_hidden()
+    expect(page.get_by_role("button", name="Iniciar scan")).to_be_enabled()  # dá para começar outro
 
 
 def test_command_palette_finds_devices_and_actions(page):

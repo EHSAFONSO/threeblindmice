@@ -14,13 +14,19 @@ from contextlib import suppress
 from enum import Enum
 from functools import partial
 
-from tbm.asyncutil import RateLimiter, gather_limited
+from tbm.asyncutil import AdaptiveSemaphore, RateLimiter, gather_limited
 
 
 class PortState(str, Enum):
     OPEN = "open"
     CLOSED = "closed"  # recebemos RST: a porta está fechada, mas o host está vivo
     FILTERED = "filtered"  # timeout/sem resposta: firewall ou host inexistente
+    ERROR = "error"  # o *nosso* sistema recusou o socket (sem buffers/portas): não diz nada do alvo
+
+
+# Falta de recurso local: EMFILE/ENFILE (24/23), ENOBUFS (105/55), EADDRNOTAVAIL (99/49),
+# WSAENOBUFS (10055), WSAEADDRINUSE (10048, portas efêmeras esgotadas), WSAEMFILE (10024).
+RESOURCE_ERRNOS = {23, 24, 49, 55, 99, 105, 10024, 10048, 10055}
 
 
 async def probe(host: str, port: int, timeout: float) -> PortState:
@@ -28,8 +34,11 @@ async def probe(host: str, port: int, timeout: float) -> PortState:
         _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
     except ConnectionRefusedError:
         return PortState.CLOSED
-    except (TimeoutError, OSError):
+    except TimeoutError:
         return PortState.FILTERED
+    except OSError as exc:
+        codes = {exc.errno, getattr(exc, "winerror", None)}
+        return PortState.ERROR if codes & RESOURCE_ERRNOS else PortState.FILTERED
     writer.close()
     with suppress(Exception):
         await writer.wait_closed()
@@ -39,10 +48,18 @@ async def probe(host: str, port: int, timeout: float) -> PortState:
 async def guarded_probe(
     sem: asyncio.Semaphore, host: str, port: int, timeout: float, limiter: RateLimiter | None = None
 ) -> PortState:
-    async with sem:
-        if limiter is not None:  # modo --gentle: limita conexões por segundo
-            await limiter.acquire()
-        return await probe(host, port, timeout)
+    for attempt in range(2):
+        async with sem:
+            if limiter is not None:  # modo --gentle: limita conexões por segundo
+                await limiter.acquire()
+            state = await probe(host, port, timeout)
+        if state is not PortState.ERROR:
+            return state
+        if isinstance(sem, AdaptiveSemaphore):
+            sem.report_error()  # muitas seguidas: o paralelismo cai pela metade
+        if attempt == 0:
+            await asyncio.sleep(0.2)  # uma nova tentativa, já com menos sockets abertos
+    return PortState.FILTERED
 
 
 async def scan_ports(
@@ -69,15 +86,20 @@ async def scan_ports(
 DISCOVERY_PORTS = (80, 443, 22, 445, 139, 135, 3389, 53, 8080, 62078, 5357, 7000)
 
 
+# Descoberta rápida (redes grandes): as portas que mais respondem, mesmo com RST.
+FAST_DISCOVERY_PORTS = (80, 443, 22, 445)
+
+
 async def is_alive(
-    host: str, timeout: float, sem: asyncio.Semaphore, limiter: RateLimiter | None = None
+    host: str, timeout: float, sem: asyncio.Semaphore, limiter: RateLimiter | None = None,
+    ports: tuple[int, ...] = DISCOVERY_PORTS,
 ) -> bool:
     """Host está vivo se *qualquer* porta responder, mesmo com RST.
 
     É a mesma ideia do 'TCP ping' do nmap. Cancelamos o resto das sondas assim
     que uma responde. O ping ICMP e a tabela ARP complementam (scout/discovery.py).
     """
-    tasks = [asyncio.create_task(guarded_probe(sem, host, p, timeout, limiter)) for p in DISCOVERY_PORTS]
+    tasks = [asyncio.create_task(guarded_probe(sem, host, p, timeout, limiter)) for p in ports]
     try:
         for next_done in asyncio.as_completed(tasks):
             if await next_done in (PortState.OPEN, PortState.CLOSED):
