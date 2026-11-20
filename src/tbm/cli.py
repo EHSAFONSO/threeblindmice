@@ -527,12 +527,37 @@ def secrets_cmd(
     raise typer.Exit(1 if fail else 0)
 
 
-@app.command()
+history_app = typer.Typer(help="Lista os scans gravados (e limpa os antigos com `prune`).")
+app.add_typer(history_app, name="history")
+
+
+@history_app.command("prune")
+def history_prune(
+    keep_days: Annotated[int, typer.Option(help="Guarda todos os scans destes últimos dias.")] = 30,
+    weekly_days: Annotated[int, typer.Option(help="Até aqui, 1 scan por semana; depois, 1 por mês.")] = 365,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Só mostra quantos sairiam.")] = False,
+    vacuum: Annotated[bool, typer.Option("--vacuum", help="Compacta o arquivo depois (pode demorar).")] = False,
+) -> None:
+    """Apaga scans antigos do histórico. O mais recente de cada rótulo nunca sai."""
+    store = HistoryStore()
+    gone = store.prune(keep_days=keep_days, weekly_until_days=weekly_days, dry_run=dry_run)
+    if dry_run:
+        console.print(f"{len(gone)} scan(s) sairiam do histórico.")
+        return
+    if vacuum and gone:
+        store.vacuum()
+    console.print(f"[green]{len(gone)} scan(s) antigo(s) apagado(s).[/]")
+
+
+@history_app.callback(invoke_without_command=True)
 def history(
+    ctx: typer.Context,
     label: Annotated[str | None, typer.Option("--label", "-l")] = None,
     limit: int = 20,
 ) -> None:
     """Lista os scans gravados."""
+    if ctx.invoked_subcommand is not None:
+        return
     rows = HistoryStore().list(label, limit)
     if not rows:
         console.print("[dim]Histórico vazio.[/]")

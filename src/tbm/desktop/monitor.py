@@ -34,8 +34,8 @@ class LiveMonitor:
         macs = {row["identity"].removeprefix("mac:") for row in self.store.devices().values()
                 if row["identity"].startswith("mac:")}
         for row in self.store.labels():
-            scan = self.store.latest(row["label"])
-            macs.update(h.mac for h in scan.hosts if h.mac) if scan else None
+            for scan in self.store.light(row["label"], 1):  # só os índices, sem abrir o relatório
+                macs.update(h.mac for h in scan.hosts if h.mac)
         return macs
 
     def start(self) -> None:

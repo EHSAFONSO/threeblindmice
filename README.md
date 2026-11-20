@@ -191,6 +191,7 @@ tbm dashboard                        # http://127.0.0.1:8765, somente leitura, f
 tbm scout 192.168.0.0/24 -o scout.json && tbm sniff scout.json --active   # em etapas
 tbm secrets . -o segredos.sarif      # credenciais vazadas → anotações nos PRs do GitHub
 tbm history / tbm diff <a> <b> / tbm report <scan_id> -o r.html
+tbm history prune --dry-run          # limpa scans antigos: tudo de 30 dias, 1/semana até 1 ano, 1/mês depois
 tbm checks                           # lista os checks
 ```
 

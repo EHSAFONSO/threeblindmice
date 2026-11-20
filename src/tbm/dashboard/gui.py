@@ -266,7 +266,7 @@ def install_gui(app: FastAPI, store: HistoryStore, gui: GuiSettings, render: Ren
         acceptances = store.acceptances()
         # aceito agora pela interface, mas o scan ainda não foi refeito: já mostramos como aceito
         pending = {fp for fp, row in acceptances.items() if is_active(row)}
-        history = [s for r in store.list(label, 30)[1:] if (s := store.get(r["scan_id"])) is not None]
+        history = store.light(label, 30, skip_latest=True)
         actions = build_actions(scan)
         info = [f for f in scan.findings if f.severity is Severity.INFO]
         accepted = [f for f in scan.findings if f.accepted]

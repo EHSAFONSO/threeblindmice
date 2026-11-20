@@ -87,8 +87,7 @@ async def execute(job: ScanJob, store: HistoryStore, progress: ProgressHook | No
     if job.no_evidence:
         result = redact(result)
     diff = diff_scans(store.latest(job.label, exclude=result.scan_id), result)
-    recent = [s for r in store.list(job.label, NOVELTY_WINDOW)
-              if r["scan_id"] != result.scan_id and (s := store.get(r["scan_id"])) is not None]
+    recent = store.light(job.label, NOVELTY_WINDOW, exclude=result.scan_id)
     mark_novelty(diff, result, recent)
     if job.save:
         store.save(result)

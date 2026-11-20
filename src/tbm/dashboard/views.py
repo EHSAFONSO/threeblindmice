@@ -73,8 +73,8 @@ def health(store: HistoryStore, label: str) -> Health | None:
     if scan is None:
         return None
     rows = store.list(label, 30)
-    history = [s for r in rows[1:] if (s := store.get(r["scan_id"])) is not None]
-    previous = history[0] if history else None
+    history = store.light(label, 30, skip_latest=True)  # do mais antigo ao anterior a este
+    previous = history[-1] if history else None
     delta = None
     if previous and previous.score is not None and scan.score is not None:
         delta = scan.score - previous.score
@@ -184,9 +184,8 @@ def offline_hosts(store: HistoryStore, label: str, scan: ScanResult, window: int
     """Aparelhos vistos nos últimos scans que não apareceram neste (desligados ou fora de casa)."""
     present = {h.identity for h in scan.hosts}
     seen: dict[str, Host] = {}
-    for r in store.list(label, window)[1:]:
-        old = store.get(r["scan_id"])
-        for h in old.hosts if old else []:
+    for old in reversed(store.light(label, window, skip_latest=True)):  # do mais recente ao mais antigo
+        for h in old.hosts:
             if h.identity not in present and h.identity not in seen:
                 seen[h.identity] = h
     return list(seen.values())
@@ -198,8 +197,7 @@ CHART = {"w": 760, "h": 250, "l": 40, "r": 18, "t": 16, "b": 34}
 
 
 def timeline(store: HistoryStore, label: str, limit: int = 30) -> dict[str, Any]:
-    rows = list(reversed(store.list(label, limit)))
-    scans = [s for r in rows if (s := store.get(r["scan_id"])) is not None]
+    scans = store.light(label, limit)
     w, h, left, right, top, bottom = (CHART[k] for k in ("w", "h", "l", "r", "t", "b"))
     pw, ph = w - left - right, h - top - bottom
     n = len(scans)
@@ -258,10 +256,7 @@ def device_history(store: HistoryStore, label: str, identity: str, limit: int = 
     events: list[dict[str, Any]] = []
     series: list[int] = []
     prev: dict[str, Any] | None = None
-    for r in reversed(store.list(label, limit)):
-        scan = store.get(r["scan_id"])
-        if scan is None:
-            continue
+    for scan in store.light(label, limit):
         host = next((h for h in scan.hosts if h.identity == identity), None)
         if host is None:
             continue
@@ -296,11 +291,6 @@ def device_detail(store: HistoryStore, label: str, address: str) -> dict[str, An
         return None
     findings = sorted((f for f in scan.findings if f.host == address), key=lambda f: f.sort_key())
     actions = [a for a in build_actions(scan) if a.host == address]
-    first_seen = None
-    for r in reversed(store.list(label, 50)):
-        s = store.get(r["scan_id"])
-        if s and any(h.identity == host.identity for h in s.hosts):
-            first_seen = s.started_at
-            break
+    first_seen = store.first_seen(label, host.identity)
     return {"host": host, "findings": findings, "actions": actions, "sev": worst(scan, address),
             "icon": device_icon(host.device_type), "first_seen": first_seen, "label": label, "scan": scan}

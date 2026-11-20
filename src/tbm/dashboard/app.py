@@ -127,26 +127,31 @@ def _when(iso: str) -> str:
 _env.filters["when"] = _when
 
 
-def build_inventory(history: list[ScanResult]) -> list[dict]:
+def build_inventory(history: list[ScanResult], seen: dict[str, dict] | None = None) -> list[dict]:
     """Dispositivos do último scan, com primeira aparição, frequência e IPs anteriores.
 
     `history` vem do mais antigo para o mais novo. O casamento é pela identidade
-    (MAC/nome), então troca de IP não cria um "dispositivo novo".
+    (MAC/nome), então troca de IP não cria um "dispositivo novo". Com `seen`
+    (de `HistoryStore.sightings`), basta passar o último scan em `history`.
     """
     latest = history[-1]
-    seen: dict[str, dict] = {}
-    for scan in history:
-        for h in scan.hosts:
-            entry = seen.setdefault(h.identity, {"first": scan.started_at, "times": 0, "ips": []})
-            entry["times"] += 1
-            if not entry["ips"] or entry["ips"][-1] != h.address:
-                entry["ips"].append(h.address)
+    if seen is None:
+        seen = {}
+        for scan in history:
+            for h in scan.hosts:
+                entry = seen.setdefault(h.identity, {"first": scan.started_at, "times": 0, "ips": []})
+                entry["times"] += 1
+                if not entry["ips"] or entry["ips"][-1] != h.address:
+                    entry["ips"].append(h.address)
+    by_host: dict[str, list] = {}
+    for f in latest.findings:
+        by_host.setdefault(f.host, []).append(f)
     devices = []
     for h in latest.hosts:
-        mine = [f for f in latest.findings if f.host == h.address]
+        mine = by_host.get(h.address, [])
         counts = {s: sum(1 for f in mine if f.severity.value == s and not f.accepted)
                   for s in ("critical", "high", "medium", "low")}
-        info = seen[h.identity]
+        info = seen.get(h.identity) or {"first": latest.started_at, "times": 1, "ips": [h.address]}
         devices.append({
             "host": h,
             "services": [s for s in h.discovery.get("mdns_services", "").split(",") if s][:6],
@@ -312,13 +317,13 @@ def create_app(store: HistoryStore, gui: GuiSettings | None = None,
 
     @app.get("/inventory/{label}", response_class=HTMLResponse)
     def inventory(label: str) -> HTMLResponse:
-        rows = store.list(label, 50)
-        if not rows:
+        latest = store.latest(label)
+        if latest is None:
             raise HTTPException(404, "rótulo sem scans")
-        history = [s for r in reversed(rows) if (s := store.get(r["scan_id"])) is not None]
-        latest = history[-1]
+        # o último completo (serviços mDNS, achados); o histórico só pelos índices
+        seen, n = store.sightings(label, 50)
         return render("inventory.html.j2", label=label, scan=latest,
-                      devices=build_inventory(history), scans_seen=len(history))
+                      devices=build_inventory([latest], seen), scans_seen=n)
 
     @app.get("/map")
     def map_default():
