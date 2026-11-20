@@ -153,7 +153,7 @@ def _m3_backfill(conn: sqlite3.Connection) -> None:
         if not isinstance(row["data"], bytes):
             conn.execute("UPDATE scans SET data = ? WHERE scan_id = ?", (encode_blob(result), row["scan_id"]))
         if loud and i % 100 == 0:
-            print(f"tbm: indexando o histórico… {i}/{total}", file=sys.stderr)
+            print(f"tbm: indexando o histórico… {i}/{total}", file=sys.stderr)  # noqa: T201 (progresso na tela)
 
 
 # Migrações numeradas: a posição na lista é a versão (PRAGMA user_version).
@@ -240,6 +240,10 @@ class HistoryStore:
             with conn:
                 MIGRATIONS[number - 1](conn)
                 conn.execute(f"PRAGMA user_version = {number}")
+        if version < SCHEMA_VERSION:
+            from tbm.log import get_logger
+
+            get_logger(__name__).info("histórico migrado da versão %d para a %d", version, SCHEMA_VERSION)
 
     @property
     def schema_version(self) -> int:

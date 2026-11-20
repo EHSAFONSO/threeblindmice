@@ -15,3 +15,6 @@ chamado*.txt
 # relatórios gerados pelo tbm (os templates são .html.j2 e não casam com isto)
 *.html
 !integration/web/html/*.html
+.coverage
+.coverage.*
+htmlcov/

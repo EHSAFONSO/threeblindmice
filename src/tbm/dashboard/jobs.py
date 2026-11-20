@@ -301,6 +301,10 @@ class JobRunner:
                     alerted = loop.run_until_complete(send_webhook(webhook, result, diff, Severity.MEDIUM))
                 except Exception as exc:  # noqa: BLE001 (o alerta não invalida o scan)
                     job.log.append(f"falha ao enviar alerta: {exc.__class__.__name__}")
+                    from tbm.log import get_logger
+
+                    # sem exc_info: a mensagem do httpx traz a URL, e a do Telegram tem o token
+                    get_logger(__name__).warning("falha ao enviar alerta: %s", exc.__class__.__name__)
                 try:
                     from tbm.squeak import summary
 

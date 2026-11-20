@@ -43,6 +43,14 @@ jobs:
           python-version: ${{ matrix.python }}
           lock: dev
       - run: pytest -q -m "not e2e"
+        if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python == '3.12') }}
+      # Cobertura medida num job só (os outros não pagam o custo); falha abaixo do fail_under do pyproject.
+      - name: pytest com cobertura
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python == '3.12' }}
+        run: |
+          coverage run -m pytest -q -m "not e2e"
+          coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+          coverage report
 
   e2e:
     # A interface num navegador de verdade (Chrome no Linux, Edge no Windows), já instalado no runner:

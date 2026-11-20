@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, replace
 
+from tbm.log import get_logger
 from tbm.models import ScanResult, utcnow
 from tbm.progress import ProgressHook
 from tbm.scope import Scope, Target
@@ -15,6 +16,8 @@ from tbm.squeak import HistoryStore, ScanDiff, diff_scans, redact
 from tbm.squeak.acceptance import apply_acceptances
 from tbm.squeak.diff import mark_novelty
 from tbm.squeak.scoring import grade_for, score_findings
+
+log = get_logger(__name__)
 
 # Quantos scans anteriores contam para decidir se um dispositivo/porta é inédito.
 NOVELTY_WINDOW = 10
@@ -105,6 +108,10 @@ async def execute(job: ScanJob, store: HistoryStore, progress: ProgressHook | No
         store.save(result)
         record_events(store, result, diff)
         remember_network(store, result)
+    log.info("scan %s rótulo=%s aparelhos=%d achados=%d nota=%s tempos=%s erros=%d", result.scan_id, result.label,
+             len(result.hosts), len(result.findings), result.score, result.timings, len(result.errors))
+    for e in result.errors:
+        log.debug("erro no scan %s: %s", result.scan_id, e)  # pode citar IP: só em DEBUG
     return result, diff
 
 

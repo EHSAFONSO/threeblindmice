@@ -198,7 +198,9 @@ tbm scan 10.0.0.0/16 --resume        # rede grande: continua um scan interrompid
 
 Em redes acima de /22, a descoberta fica rápida sozinha (`--discovery auto`). O TCP passa a testar 4 portas em vez de 12, sem um ping do sistema por IP. Depois, o ping vai só para os blocos /24 roteados em que algo respondeu, com um teto de 4.096 endereços. O timeout segue o RTT medido. O paralelismo cai pela metade se o sistema começar a recusar sockets. Na interface, o scan em andamento mostra o tempo restante e tem um botão **Cancelar**. O relatório mostra o tempo gasto em cada fase.
 
-Variáveis de ambiente: `NVD_API_KEY` (limite do NVD sobe de 5 para 50 req/30s), `TBM_WEBHOOK`, `TBM_HOME` (padrão `~/.threeblindmice`).
+Variáveis de ambiente: `NVD_API_KEY` (limite do NVD sobe de 5 para 50 req/30s), `TBM_WEBHOOK`, `TBM_HOME` (padrão `~/.threeblindmice`), `TBM_LOG_LEVEL`.
+
+Log técnico, para diagnosticar problemas: `TBM_HOME/logs/tbm.log`, rotativo, com permissão só do dono. Em `info`, que é o padrão, ele registra rótulos, contagens e tempos, mas nunca IP, MAC ou nome de aparelho. O detalhe por aparelho só aparece com `tbm --log-level debug …`.
 
 Falsos positivos de segredos: use um comentário `tbm:allow` na linha ou liste o caminho no `.tbmignore`.
 
@@ -283,6 +285,8 @@ As faixas (`>=`) do `pyproject.toml` continuam, de propósito: quem instala o tb
 ```bash
 pytest -q                     # unitários, fuzzing e interface no navegador, sem rede externa
 pytest -m e2e                 # só a interface no navegador (Playwright + Edge/Chrome já instalados)
+coverage run -m pytest -m "not e2e" && coverage report   # cobertura (o CI falha abaixo de 70%)
+TBM_PERF=1 pytest -m perf tests/perf -s                  # benchmarks: histórico de 1.000 scans e /16 simulada
 mypy src                      # tipos
 docker compose -f integration/compose.yml up -d --build --wait redis ftp web ssh snmp
 docker compose -f integration/compose.yml run --rm --build scanner

@@ -20,6 +20,7 @@ from importlib.metadata import EntryPoint, entry_points
 from types import ModuleType
 
 from tbm import config
+from tbm.log import get_logger
 
 API_VERSION = 1  # muda só quando tbm.plugin quebrar compatibilidade
 GROUPS = ("tbm.checks", "tbm.notifiers", "tbm.discovery")
@@ -131,7 +132,10 @@ def load_plugins(*, force: bool = False) -> list[str]:
                 _register(ep.load(), ep.group, origin)
             except Exception as exc:  # noqa: BLE001 (plugin quebrado não derruba o tbm)
                 LOAD_ERRORS.append(f"{pkg} ({ep.name}): {exc.__class__.__name__}: {exc}")
+                get_logger(__name__).warning("plugin %s (%s) ficou de fora: %s", pkg, ep.name, exc.__class__.__name__,
+                                             exc_info=True)
                 continue
+            get_logger(__name__).info("plugin carregado: %s %s (%s)", pkg, ver, ep.name)
             for cid in set(REGISTRY) - before:  # checks registrados por um módulo-plugin
                 ORIGINS.setdefault(cid, origin)
         return LOAD_ERRORS

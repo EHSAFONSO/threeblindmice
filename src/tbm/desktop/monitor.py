@@ -52,8 +52,12 @@ class LiveMonitor:
             while not self._stop.wait(self.interval):
                 try:
                     self._tick(loop)
-                except Exception:  # noqa: BLE001,S110 (o vigia nunca derruba o app)
-                    pass
+                except Exception as exc:  # noqa: BLE001 (o vigia nunca derruba o app)
+                    from tbm.log import get_logger
+
+                    log = get_logger(__name__)
+                    log.warning("vigia em tempo real: %s", exc.__class__.__name__)
+                    log.debug("vigia em tempo real: detalhes", exc_info=True)  # a mensagem pode citar IP
         finally:
             loop.close()
 

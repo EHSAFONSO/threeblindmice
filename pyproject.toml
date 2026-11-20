@@ -27,6 +27,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "hypothesis>=6.100",
+    "coverage[toml]>=7.4",  # cobertura no CI (coverage run -m pytest)
     "ruff>=0.5",
     "mypy>=1.10",
     "types-PyYAML",
@@ -63,8 +64,21 @@ pythonpath = ["src"]
 markers = [
     "integration: precisa do ambiente Docker Compose (TBM_INTEGRATION=1)",
     "e2e: interface no navegador (Playwright + Edge/Chrome instalados)",
+    "perf: benchmarks (TBM_PERF=1), fora do CI padrão",
 ]
 filterwarnings = ["ignore:.*httpx2.*"]  # aviso interno do starlette.testclient
+
+[tool.coverage.run]
+source = ["tbm"]
+branch = true
+parallel = false
+
+[tool.coverage.report]
+show_missing = false
+skip_covered = true
+# meta mínima: o valor medido quando a cobertura entrou no CI (só sobe)
+fail_under = 70
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@abstractmethod"]
 
 [tool.mypy]
 python_version = "3.11"

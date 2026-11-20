@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -38,6 +39,15 @@ app = typer.Typer(
     add_completion=False,
     rich_markup_mode="rich",
 )
+# Windows com saída num pipe (cp1252): um "→" na ajuda derrubava o comando com
+# UnicodeEncodeError. Caractere que o destino não suporta vira "?", e o comando segue.
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and (getattr(_stream, "encoding", "") or "").lower().replace("-", "") != "utf8":
+        try:
+            _stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            pass
+
 console = Console()
 err = Console(stderr=True)
 

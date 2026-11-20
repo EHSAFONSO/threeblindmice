@@ -88,14 +88,19 @@ def server_ids(responses: list[bytes], xid: bytes) -> set[str]:
             continue
         opts, i = data[240:], 0
         found = None
-        while i < len(opts):
+        # As opções vêm de quem respondeu (pode ser justamente o DHCP intruso): comprimento
+        # mentiroso ou pacote cortado no meio encerram a leitura, nunca derrubam o check.
+        while i + 1 < len(opts):
             code = opts[i]
             if code == 0xFF or code == 0:
                 i += 1
                 continue
             length = opts[i + 1]
+            value = opts[i + 2:i + 2 + length]
+            if len(value) < length:
+                break
             if code == 54 and length == 4:  # server identifier
-                found = socket.inet_ntoa(opts[i + 2:i + 6])
+                found = socket.inet_ntoa(value)
             i += 2 + length
         servers.add(found or socket.inet_ntoa(data[20:24]))
     return servers
