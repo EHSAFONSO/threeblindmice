@@ -1,13 +1,13 @@
 {
     "//": "Manifesto do Scoop (gerenciador de pacotes do Windows). Instale com: scoop install https://raw.githubusercontent.com/EHSAFONSO/threeblindmice/main/packaging/scoop/threeblindmice.json . O autoupdate puxa a versão nova a cada release; o checkver lê a tag mais recente. Submeter ao bucket oficial é um passo manual.",
-    "version": "0.9.0",
+    "version": "0.10.0",
     "description": "Segurança da sua rede: descobre aparelhos, avalia riscos e dá uma nota (Scout/Sniffer/Squeak).",
     "homepage": "https://github.com/EHSAFONSO/threeblindmice",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/EHSAFONSO/threeblindmice/releases/download/v0.9.0/threeblindmice_0.9.0_x64-setup.exe#/dl.exe",
-            "hash": "https://github.com/EHSAFONSO/threeblindmice/releases/download/v0.9.0/threeblindmice_0.9.0_x64-setup.exe.sha256"
+            "url": "https://github.com/EHSAFONSO/threeblindmice/releases/download/v0.10.0/threeblindmice_0.10.0_x64-setup.exe#/dl.exe",
+            "hash": "https://github.com/EHSAFONSO/threeblindmice/releases/download/v0.10.0/threeblindmice_0.10.0_x64-setup.exe.sha256"
         }
     },
     "innosetup": true,

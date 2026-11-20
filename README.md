@@ -21,7 +21,7 @@ Baixe o `threeblindmice_<versão>_x64-setup.exe` na [página de releases](https:
 O instalador ainda não tem assinatura digital, então o Windows pode mostrar "O Windows protegeu o computador": clique em *Mais informações* e depois em *Executar assim mesmo*. Antes, confira que o arquivo é o original comparando o SHA-256 com o do arquivo `.sha256` publicado na release:
 
 ```bash
-certutil -hashfile threeblindmice_0.9.0_x64-setup.exe SHA256
+certutil -hashfile threeblindmice_0.10.0_x64-setup.exe SHA256
 ```
 
 Para gerar o instalador você mesmo: `pip install -e ".[desktop]" pyinstaller` e `python packaging/windows/build.py` (precisa do [Inno Setup 6](https://jrsoftware.org/isinfo.php)).
